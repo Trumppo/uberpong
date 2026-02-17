@@ -38,6 +38,7 @@ const game = {
   ended: false,
   started: false,
   riskZoneActive: false,
+  victoryExplosionDone: false,
   sfxEnabled: true,
   audioCtx: null
 };
@@ -184,6 +185,7 @@ function applyMode(modeKey, options = {}) {
   game.enduranceCurrent = 0;
   game.enduranceBest = loadHighScore(modeKey);
   game.ended = false;
+  game.victoryExplosionDone = false;
   game.started = start;
   game.particles = [];
   game.paddles = createPaddles();
@@ -268,6 +270,23 @@ function updatePaddlesHuman() {
       p.slapReady = true;
     }
   });
+}
+
+function spawnVictoryExplosion(winner) {
+  const colors = ["#ff4fd8", "#ff9f43", "#ffe14f", "#62ff8a", "#30d9ff", "#8d66ff", "#ffffff"];
+  for (let i = 0; i < 36; i += 1) {
+    const x = Math.random() * W;
+    const y = Math.random() * H;
+    const c = colors[i % colors.length];
+    const amount = 10 + Math.floor(Math.random() * 8);
+    const speed = 2.4 + Math.random() * 2.8;
+    spawnParticles(x, y, c, amount, speed);
+  }
+
+  spawnParticles(W * (winner === 0 ? 0.25 : 0.75), H * 0.45, winner === 0 ? "#5be0ff" : "#ff6e9c", 52, 5.6);
+  playTone(300, 0.07, "sawtooth", 0.08);
+  playTone(450, 0.09, "square", 0.06);
+  playTone(620, 0.11, "triangle", 0.05);
 }
 
 function updatePaddleAI() {
@@ -358,6 +377,10 @@ function onGoal(scorer) {
 
   if (game.scores[scorer] >= game.mode.pointsToWin) {
     game.ended = true;
+    if (!game.victoryExplosionDone) {
+      spawnVictoryExplosion(scorer);
+      game.victoryExplosionDone = true;
+    }
     return;
   }
 
@@ -456,10 +479,18 @@ function drawObjects() {
 
   drawParticles();
 
-  ctx.fillStyle = "rgba(235,242,250,0.82)";
-  ctx.font = "bold 36px 'Segoe UI', sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillStyle = "rgba(91,224,255,0.95)";
+  ctx.font = "700 15px 'Segoe UI', sans-serif";
+  ctx.fillText("P1", W * 0.25, 24);
+  ctx.fillStyle = "rgba(255,110,156,0.95)";
+  ctx.fillText("P2", W * 0.75, 24);
+
+  ctx.fillStyle = "rgba(235,242,250,0.9)";
+  ctx.font = "bold 38px 'Segoe UI', sans-serif";
   ctx.fillText(String(game.scores[0]), W * 0.25, 56);
   ctx.fillText(String(game.scores[1]), W * 0.75, 56);
+  ctx.textAlign = "start";
 
   if (game.ended) {
     ctx.fillStyle = "rgba(0,0,0,0.55)";
