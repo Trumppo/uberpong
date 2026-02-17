@@ -28,6 +28,8 @@ const MUSIC_BPM = 168;
 const MUSIC_STEP_MS = Math.round((60000 / MUSIC_BPM) / 4);
 const MUSIC_ROOTS = [57, 57, 60, 60, 62, 62, 55, 55];
 const MUSIC_LEAD = [0, 7, 12, 7, 2, 9, 14, 9, 4, 11, 16, 11, 2, 9, 14, 7];
+const FONT_DISPLAY = "'Orbitron', 'Segoe UI', sans-serif";
+const FONT_UI = "'Exo 2', 'Segoe UI', sans-serif";
 
 const game = {
   config: null,
@@ -62,7 +64,14 @@ const game = {
   hitFreezeFrames: 0,
   slowMoFrames: 0,
   slowMoTick: false,
-  goalSplashTimer: 0
+  goalSplashTimer: 0,
+  hudPulseTimers: new Map(),
+  lastHud: {
+    tempo: 0,
+    combo: 0,
+    p1: 0,
+    p2: 0
+  }
 };
 
 function loadHighScore(modeKey) {
@@ -325,6 +334,7 @@ function reflectFromPaddle(paddle, playerIndex) {
   }
 
   spawnParticles(game.puck.x, game.puck.y, playerIndex === 0 ? "#5be0ff" : "#ff6e9c", 16, 2.6);
+  spawnParticles(game.puck.x, game.puck.y, "#ffffff", 6, 4.6);
   playTone(440 + Math.min(game.combo, 12) * 16, 0.045, "square", 0.03);
   addShake(0.6 + (game.tempo / 100) * 1.2);
   addImpactRing(game.puck.x, game.puck.y, playerIndex === 0 ? "#5be0ff" : "#ff6e9c");
@@ -343,7 +353,10 @@ function checkRiskZones() {
     inRiskZone = true;
     if (!game.riskZoneActive) {
       if (game.modeKey !== "endurance") {
-        game.scores[game.lastHitBy] += 1;
+        const riskBonus = Number(game.mode.riskBonus ?? 1);
+        if (riskBonus > 0) {
+          game.scores[game.lastHitBy] += riskBonus;
+        }
       }
       const speed = Math.hypot(game.puck.vx, game.puck.vy);
       const boosted = clamp(speed * 1.04, game.mode.basePuckSpeed, game.mode.maxPuckSpeed * 1.2);
@@ -478,15 +491,25 @@ function updateSpectacle() {
 
 function updatePuckTrail() {
   if (!game.started || game.ended || !game.puck) return;
-  game.puckTrail.push({ x: game.puck.x, y: game.puck.y, life: 1 });
+  const hueBase = (190 + game.tempo * 1.2 + performance.now() * 0.04) % 360;
+  const speed = Math.hypot(game.puck.vx, game.puck.vy);
+  game.puckTrail.push({
+    x: game.puck.x,
+    y: game.puck.y,
+    life: 1,
+    hue: hueBase,
+    size: 3.6 + speed * 0.2
+  });
   game.puckTrail = game.puckTrail
     .map((point) => ({
       x: point.x,
       y: point.y,
-      life: point.life - 0.08
+      life: point.life - 0.07,
+      hue: point.hue,
+      size: point.size
     }))
     .filter((point) => point.life > 0);
-  if (game.puckTrail.length > 26) {
+  if (game.puckTrail.length > 34) {
     game.puckTrail.shift();
   }
 }
@@ -495,10 +518,10 @@ function drawPuckTrail() {
   for (let i = 0; i < game.puckTrail.length; i += 1) {
     const point = game.puckTrail[i];
     const alpha = clamp(point.life, 0, 1);
-    const hue = 180 + i * 3;
-    ctx.fillStyle = `hsla(${hue}, 95%, 70%, ${alpha * 0.65})`;
+    const hue = (point.hue + i * 4) % 360;
+    ctx.fillStyle = `hsla(${hue}, 100%, 72%, ${alpha * 0.75})`;
     ctx.beginPath();
-    ctx.arc(point.x, point.y, 4 + i * 0.08, 0, Math.PI * 2);
+    ctx.arc(point.x, point.y, point.size + i * 0.08, 0, Math.PI * 2);
     ctx.fill();
   }
 }
@@ -513,7 +536,17 @@ function onComboTierUp(tier, x, y) {
 }
 
 function addImpactRing(x, y, color) {
-  game.impactRings.push({ x, y, r: 8, life: 1, color });
+  const ringColors = [color, "#ffffff", "#ffe14f"];
+  ringColors.forEach((ringColor, idx) => {
+    game.impactRings.push({
+      x,
+      y,
+      r: 8 + idx * 4,
+      life: 1,
+      color: ringColor,
+      width: 2 + idx
+    });
+  });
 }
 
 function updateImpactRings() {
@@ -523,7 +556,8 @@ function updateImpactRings() {
       y: ring.y,
       r: ring.r + 3.4,
       life: ring.life - 0.08,
-      color: ring.color
+      color: ring.color,
+      width: ring.width
     }))
     .filter((ring) => ring.life > 0);
   if (game.impactRings.length > 18) {
@@ -536,7 +570,7 @@ function drawImpactRings() {
     ctx.strokeStyle = `${ring.color}${Math.floor(ring.life * 200)
       .toString(16)
       .padStart(2, "0")}`;
-    ctx.lineWidth = 2;
+    ctx.lineWidth = ring.width || 2;
     ctx.beginPath();
     ctx.arc(ring.x, ring.y, ring.r, 0, Math.PI * 2);
     ctx.stroke();
@@ -550,11 +584,14 @@ function drawGoalSplash() {
   ctx.translate(W / 2, H / 2 - 80);
   ctx.scale(scale, scale);
   ctx.textAlign = "center";
+  ctx.font = `700 66px ${FONT_DISPLAY}`;
   ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
-  ctx.font = "bold 54px 'Segoe UI', sans-serif";
+  ctx.shadowColor = `rgba(255, 79, 216, ${alpha * 0.9})`;
+  ctx.shadowBlur = 24;
   ctx.fillText("UBER GOAL!", 0, 0);
-  ctx.strokeStyle = `rgba(255, 79, 216, ${alpha * 0.9})`;
-  ctx.lineWidth = 3;
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = `rgba(76, 223, 255, ${alpha * 0.9})`;
+  ctx.lineWidth = 4;
   ctx.strokeText("UBER GOAL!", 0, 0);
   ctx.restore();
 }
@@ -699,7 +736,35 @@ function drawCourt() {
 
   const now = performance.now() * 0.001;
   const tempoT = game.tempo / 100;
-  const pulse = 0.12 + tempoT * 0.28 + Math.sin(now * 3.4) * (0.05 + tempoT * 0.08);
+  const pulse = 0.12 + tempoT * 0.32 + Math.sin(now * 3.4) * (0.06 + tempoT * 0.1);
+
+  const base = ctx.createLinearGradient(0, 0, W, H);
+  base.addColorStop(0, "rgba(9, 6, 22, 1)");
+  base.addColorStop(0.45, "rgba(18, 10, 38, 1)");
+  base.addColorStop(1, "rgba(10, 8, 28, 1)");
+  ctx.fillStyle = base;
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.save();
+  ctx.globalCompositeOperation = "screen";
+  const centerGlow = ctx.createRadialGradient(W * 0.5, H * 0.45, 40, W * 0.5, H * 0.45, W * 0.65);
+  centerGlow.addColorStop(0, `rgba(76, 223, 255, ${0.18 + pulse})`);
+  centerGlow.addColorStop(1, "rgba(0, 0, 0, 0)");
+  ctx.fillStyle = centerGlow;
+  ctx.fillRect(0, 0, W, H);
+
+  const leftGlow = ctx.createRadialGradient(0, H * 0.2, 20, 0, H * 0.2, W * 0.5);
+  leftGlow.addColorStop(0, `rgba(255, 79, 216, ${0.12 + pulse * 0.8})`);
+  leftGlow.addColorStop(1, "rgba(0, 0, 0, 0)");
+  ctx.fillStyle = leftGlow;
+  ctx.fillRect(0, 0, W, H);
+
+  const rightGlow = ctx.createRadialGradient(W, H * 0.8, 20, W, H * 0.8, W * 0.55);
+  rightGlow.addColorStop(0, `rgba(255, 217, 61, ${0.12 + pulse * 0.7})`);
+  rightGlow.addColorStop(1, "rgba(0, 0, 0, 0)");
+  ctx.fillStyle = rightGlow;
+  ctx.fillRect(0, 0, W, H);
+  ctx.restore();
 
   const rainbow = ctx.createLinearGradient(
     Math.cos(now * 0.3) * W * 0.35,
@@ -707,14 +772,25 @@ function drawCourt() {
     W + Math.sin(now * 0.35) * W * 0.35,
     H
   );
-  rainbow.addColorStop(0, `rgba(255, 70, 190, ${0.35 + pulse})`);
-  rainbow.addColorStop(0.18, `rgba(255, 142, 76, ${0.3 + pulse})`);
-  rainbow.addColorStop(0.36, `rgba(255, 225, 85, ${0.28 + pulse})`);
-  rainbow.addColorStop(0.54, `rgba(116, 255, 125, ${0.26 + pulse})`);
-  rainbow.addColorStop(0.72, `rgba(76, 223, 255, ${0.26 + pulse})`);
-  rainbow.addColorStop(1, `rgba(158, 108, 255, ${0.34 + pulse})`);
+  rainbow.addColorStop(0, `rgba(255, 70, 190, ${0.32 + pulse})`);
+  rainbow.addColorStop(0.18, `rgba(255, 142, 76, ${0.28 + pulse})`);
+  rainbow.addColorStop(0.36, `rgba(255, 225, 85, ${0.26 + pulse})`);
+  rainbow.addColorStop(0.54, `rgba(116, 255, 125, ${0.24 + pulse})`);
+  rainbow.addColorStop(0.72, `rgba(76, 223, 255, ${0.24 + pulse})`);
+  rainbow.addColorStop(1, `rgba(158, 108, 255, ${0.32 + pulse})`);
   ctx.fillStyle = rainbow;
   ctx.fillRect(0, 0, W, H);
+
+  ctx.save();
+  ctx.globalAlpha = 0.12 + tempoT * 0.12;
+  ctx.translate(-W * 0.2, 0);
+  ctx.rotate(-Math.PI / 12);
+  for (let i = 0; i < 5; i += 1) {
+    const x = ((now * 80 + i * 220) % (W * 1.6)) - W * 0.3;
+    ctx.fillStyle = "rgba(120, 255, 255, 0.18)";
+    ctx.fillRect(x, -H, 120, H * 2);
+  }
+  ctx.restore();
 
   const vignette = ctx.createRadialGradient(W / 2, H / 2, 80, W / 2, H / 2, W * 0.62);
   vignette.addColorStop(0, `rgba(10, 8, 26, ${0.05 + tempoT * 0.08})`);
@@ -733,11 +809,21 @@ function drawCourt() {
   game.config.riskZones.forEach((zone, idx) => {
     const hue = (now * 90 + idx * 80) % 360;
     const glow = 0.22 + tempoT * 0.28 + Math.sin(now * 4 + idx) * 0.12;
-    ctx.fillStyle = `hsla(${hue}, 98%, 66%, ${0.2 + glow})`;
+    const field = ctx.createLinearGradient(zone.x, zone.y, zone.x + zone.w, zone.y + zone.h);
+    field.addColorStop(0, `hsla(${hue}, 100%, 70%, ${0.18 + glow})`);
+    field.addColorStop(1, `hsla(${(hue + 60) % 360}, 100%, 72%, ${0.32 + glow})`);
+    ctx.fillStyle = field;
+    ctx.fillRect(zone.x, zone.y, zone.w, zone.h);
+
+    ctx.save();
     ctx.strokeStyle = `hsla(${(hue + 55) % 360}, 100%, 76%, ${0.7 + glow})`;
     ctx.lineWidth = 2 + tempoT * 1.8;
-    ctx.fillRect(zone.x, zone.y, zone.w, zone.h);
+    ctx.shadowColor = `hsla(${(hue + 55) % 360}, 100%, 76%, ${0.6 + glow})`;
+    ctx.shadowBlur = 12 + tempoT * 10;
+    ctx.setLineDash([8, 10]);
+    ctx.lineDashOffset = -now * 40;
     ctx.strokeRect(zone.x, zone.y, zone.w, zone.h);
+    ctx.restore();
   });
 
   ctx.strokeStyle = "rgba(255,255,255,0.38)";
@@ -747,12 +833,28 @@ function drawCourt() {
   ctx.lineTo(W / 2, H);
   ctx.stroke();
   ctx.setLineDash([]);
+
+  ctx.save();
+  ctx.globalAlpha = 0.12;
+  ctx.strokeStyle = "rgba(5, 4, 12, 0.6)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let y = 0; y < H; y += 4) {
+    ctx.moveTo(0, y);
+    ctx.lineTo(W, y);
+  }
+  ctx.stroke();
+  ctx.restore();
 }
 
 function drawObjects() {
   game.paddles.forEach((p) => {
+    ctx.save();
+    ctx.shadowColor = p.color;
+    ctx.shadowBlur = 18 + game.tempo * 0.25;
     ctx.fillStyle = p.color;
     ctx.fillRect(p.x, p.y, p.w, p.h);
+    ctx.restore();
 
     if (p.slapReady) {
       const glow = 0.4 + (game.tempo / 100) * 0.6;
@@ -767,6 +869,26 @@ function drawObjects() {
 
   drawImpactRings();
   drawPuckTrail();
+  const glow = ctx.createRadialGradient(
+    game.puck.x,
+    game.puck.y,
+    2,
+    game.puck.x,
+    game.puck.y,
+    game.puck.r * 4.2
+  );
+  const glowHue = (200 + game.tempo * 1.4) % 360;
+  glow.addColorStop(0, `hsla(${glowHue}, 100%, 80%, 0.9)`);
+  glow.addColorStop(0.4, `hsla(${glowHue}, 100%, 70%, 0.5)`);
+  glow.addColorStop(1, "rgba(0, 0, 0, 0)");
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(game.puck.x, game.puck.y, game.puck.r * 3.6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
   ctx.fillStyle = game.puck.color;
   ctx.beginPath();
   ctx.arc(game.puck.x, game.puck.y, game.puck.r, 0, Math.PI * 2);
@@ -774,25 +896,31 @@ function drawObjects() {
 
   ctx.textAlign = "center";
   ctx.fillStyle = "rgba(91,224,255,0.95)";
-  ctx.font = "700 15px 'Segoe UI', sans-serif";
+  ctx.font = `700 15px ${FONT_DISPLAY}`;
+  ctx.shadowColor = "rgba(91, 224, 255, 0.6)";
+  ctx.shadowBlur = 12;
   ctx.fillText("P1", W * 0.25, 24);
   ctx.fillStyle = "rgba(255,110,156,0.95)";
   ctx.fillText("P2", W * 0.75, 24);
+  ctx.shadowBlur = 0;
 
-  ctx.fillStyle = "rgba(235,242,250,0.9)";
-  ctx.font = "bold 38px 'Segoe UI', sans-serif";
+  ctx.fillStyle = "rgba(235,242,250,0.92)";
+  ctx.font = `700 42px ${FONT_DISPLAY}`;
+  ctx.shadowColor = "rgba(158, 108, 255, 0.5)";
+  ctx.shadowBlur = 16;
   ctx.fillText(String(game.scores[0]), W * 0.25, 56);
   ctx.fillText(String(game.scores[1]), W * 0.75, 56);
   ctx.textAlign = "start";
+  ctx.shadowBlur = 0;
 
   if (game.ended) {
     ctx.fillStyle = "rgba(0,0,0,0.55)";
     ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 42px 'Segoe UI', sans-serif";
+    ctx.font = `700 42px ${FONT_DISPLAY}`;
     ctx.textAlign = "center";
     ctx.fillText(`P${game.lastScorer + 1} voitti!`, W / 2, H / 2 - 10);
-    ctx.font = "20px 'Segoe UI', sans-serif";
+    ctx.font = `20px ${FONT_UI}`;
     ctx.fillText("Paina aloita / resetoi pelataksesi uudelleen", W / 2, H / 2 + 28);
     ctx.textAlign = "start";
   }
@@ -801,7 +929,7 @@ function drawObjects() {
     ctx.fillStyle = "rgba(0,0,0,0.5)";
     ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 36px 'Segoe UI', sans-serif";
+    ctx.font = `700 36px ${FONT_DISPLAY}`;
     ctx.textAlign = "center";
     ctx.fillText("Paina aloita / resetoi pelataksesi uudelleen", W / 2, H / 2);
     ctx.textAlign = "start";
@@ -812,17 +940,54 @@ function drawObjects() {
   drawGoalSplash();
 
   ctx.fillStyle = "rgba(245, 242, 255, 0.75)";
-  ctx.font = "12px 'Segoe UI', sans-serif";
+  ctx.font = `12px ${FONT_UI}`;
   ctx.textAlign = "center";
   ctx.fillText(GAME_VERSION_LABEL, W / 2, H - 10);
   ctx.textAlign = "start";
 }
 
+function pulseHud(el) {
+  if (!el) return;
+  const existing = game.hudPulseTimers.get(el);
+  if (existing) window.clearTimeout(existing);
+  el.classList.remove("hud-pulse");
+  window.requestAnimationFrame(() => {
+    el.classList.add("hud-pulse");
+  });
+  const timer = window.setTimeout(() => {
+    el.classList.remove("hud-pulse");
+    game.hudPulseTimers.delete(el);
+  }, 240);
+  game.hudPulseTimers.set(el, timer);
+}
+
 function renderHud() {
-  tempoValue.textContent = game.tempo.toFixed(0);
-  comboValue.textContent = String(game.combo);
-  p1Score.textContent = String(game.scores[0]);
-  p2Score.textContent = String(game.scores[1]);
+  const tempoNow = Math.round(game.tempo);
+  const comboNow = game.combo;
+  const p1Now = game.scores[0];
+  const p2Now = game.scores[1];
+
+  tempoValue.textContent = String(tempoNow);
+  comboValue.textContent = String(comboNow);
+  p1Score.textContent = String(p1Now);
+  p2Score.textContent = String(p2Now);
+
+  if (tempoNow !== game.lastHud.tempo) {
+    pulseHud(tempoValue);
+    game.lastHud.tempo = tempoNow;
+  }
+  if (comboNow !== game.lastHud.combo) {
+    pulseHud(comboValue);
+    game.lastHud.combo = comboNow;
+  }
+  if (p1Now !== game.lastHud.p1) {
+    pulseHud(p1Score);
+    game.lastHud.p1 = p1Now;
+  }
+  if (p2Now !== game.lastHud.p2) {
+    pulseHud(p2Score);
+    game.lastHud.p2 = p2Now;
+  }
   enduranceValue.textContent = `${game.enduranceCurrent.toFixed(1)}s`;
   bestValue.textContent = `${game.enduranceBest.toFixed(1)}s`;
   aiState.textContent = game.opponent === "ai" ? "ON" : "OFF";
@@ -839,9 +1004,15 @@ function loop() {
   const shake = game.shakePower;
   const shakeX = shake ? (Math.random() * 2 - 1) * shake : 0;
   const shakeY = shake ? (Math.random() * 2 - 1) * shake : 0;
+  const zoom = game.goalSplashTimer > 0 ? 1 + (game.goalSplashTimer / 42) * 0.012 : 1;
 
   ctx.save();
   ctx.translate(shakeX, shakeY);
+  if (zoom !== 1) {
+    ctx.translate(W / 2, H / 2);
+    ctx.scale(zoom, zoom);
+    ctx.translate(-W / 2, -H / 2);
+  }
   drawCourt();
   drawObjects();
   if (game.flashAlpha > 0) {
