@@ -632,10 +632,15 @@ function onGoal(scorer) {
   game.scores[scorer] += 1;
   game.lastScorer = scorer;
 
-  if (game.scores[scorer] >= game.mode.pointsToWin) {
+  const lead = Math.abs(game.scores[0] - game.scores[1]);
+  const reachedThreshold =
+    game.scores[0] >= game.mode.pointsToWin || game.scores[1] >= game.mode.pointsToWin;
+  if (reachedThreshold && lead >= 2) {
+    const winner = game.scores[0] > game.scores[1] ? 0 : 1;
     game.ended = true;
+    game.lastScorer = winner;
     if (!game.victoryExplosionDone) {
-      spawnVictoryExplosion(scorer);
+      spawnVictoryExplosion(winner);
       game.victoryExplosionDone = true;
     }
     playTone(720, 0.12, "sawtooth", 0.08);
