@@ -18,6 +18,8 @@ const mobileControls = document.getElementById("mobileControls");
 const W = canvas.width;
 const H = canvas.height;
 const keys = new Set();
+const GAME_VERSION = { major: 1, minor: 1 };
+const GAME_VERSION_LABEL = `v${GAME_VERSION.major}.${GAME_VERSION.minor}`;
 
 const game = {
   config: null,
@@ -527,6 +529,12 @@ function drawObjects() {
 
   // Keep particles visible over overlays so victory blast can fade out naturally.
   drawParticles();
+
+  ctx.fillStyle = "rgba(245, 242, 255, 0.75)";
+  ctx.font = "12px 'Segoe UI', sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText(GAME_VERSION_LABEL, W / 2, H - 10);
+  ctx.textAlign = "start";
 }
 
 function renderHud() {
