@@ -36,6 +36,8 @@ const game = {
   lastScorer: 0,
   lastHitBy: 0,
   ended: false,
+  started: false,
+  riskZoneActive: false,
   sfxEnabled: true,
   audioCtx: null
 };
@@ -164,6 +166,7 @@ function createPuck(servingPlayer = 0) {
 function resetRally(servingPlayer = 0) {
   game.combo = 0;
   game.tempo = 0;
+  game.riskZoneActive = false;
   game.rallyStart = performance.now();
   game.lastHitBy = servingPlayer;
   game.puck = createPuck(servingPlayer);
@@ -173,16 +176,22 @@ function resetRally(servingPlayer = 0) {
   spawnParticles(W / 2, H / 2, "#9edcff", 20, 2.2);
 }
 
-function applyMode(modeKey) {
+function applyMode(modeKey, options = {}) {
+  const { start = false } = options;
   game.modeKey = modeKey;
   game.mode = game.config.modes[modeKey];
   game.scores = [0, 0];
   game.enduranceCurrent = 0;
   game.enduranceBest = loadHighScore(modeKey);
   game.ended = false;
+  game.started = start;
   game.particles = [];
   game.paddles = createPaddles();
   resetRally(0);
+  if (!start) {
+    game.puck.vx = 0;
+    game.puck.vy = 0;
+  }
 }
 
 function updateTempo() {
@@ -220,15 +229,19 @@ function reflectFromPaddle(paddle, playerIndex) {
 }
 
 function checkRiskZones() {
+  let inRiskZone = false;
   for (const zone of game.config.riskZones) {
-    if (
+    const overlaps =
       game.puck.x + game.puck.r >= zone.x &&
       game.puck.x - game.puck.r <= zone.x + zone.w &&
       game.puck.y + game.puck.r >= zone.y &&
-      game.puck.y - game.puck.r <= zone.y + zone.h
-    ) {
+      game.puck.y - game.puck.r <= zone.y + zone.h;
+    if (!overlaps) continue;
+
+    inRiskZone = true;
+    if (!game.riskZoneActive) {
       if (game.modeKey !== "endurance") {
-        game.scores[game.lastHitBy] += game.mode.riskBonus;
+        game.scores[game.lastHitBy] += 1;
       }
       const speed = Math.hypot(game.puck.vx, game.puck.vy);
       const boosted = clamp(speed * 1.04, game.mode.basePuckSpeed, game.mode.maxPuckSpeed * 1.2);
@@ -237,9 +250,10 @@ function checkRiskZones() {
       game.puck.vy *= scale;
       spawnParticles(game.puck.x, game.puck.y, "#ffc24a", 16, 2.8);
       playTone(600, 0.03, "sawtooth", 0.03);
-      break;
     }
+    break;
   }
+  game.riskZoneActive = inRiskZone;
 }
 
 function updatePaddlesHuman() {
@@ -351,7 +365,7 @@ function onGoal(scorer) {
 }
 
 function update() {
-  if (!game.ended) {
+  if (game.started && !game.ended) {
     updatePaddlesHuman();
     updatePaddleAI();
     updateTempo();
@@ -373,19 +387,48 @@ function update() {
 function drawCourt() {
   ctx.clearRect(0, 0, W, H);
 
-  const glow = Math.floor(30 + (game.tempo / 100) * 150);
-  ctx.fillStyle = `rgb(${10 + glow / 12}, ${14 + glow / 14}, ${20 + glow / 10})`;
+  const now = performance.now() * 0.001;
+  const pulse = 0.12 + (game.tempo / 100) * 0.22;
+
+  const rainbow = ctx.createLinearGradient(
+    Math.cos(now * 0.3) * W * 0.35,
+    0,
+    W + Math.sin(now * 0.35) * W * 0.35,
+    H
+  );
+  rainbow.addColorStop(0, `rgba(255, 70, 190, ${0.4 + pulse})`);
+  rainbow.addColorStop(0.18, `rgba(255, 142, 76, ${0.33 + pulse})`);
+  rainbow.addColorStop(0.36, `rgba(255, 225, 85, ${0.32 + pulse})`);
+  rainbow.addColorStop(0.54, `rgba(116, 255, 125, ${0.3 + pulse})`);
+  rainbow.addColorStop(0.72, `rgba(76, 223, 255, ${0.3 + pulse})`);
+  rainbow.addColorStop(1, `rgba(158, 108, 255, ${0.38 + pulse})`);
+  ctx.fillStyle = rainbow;
   ctx.fillRect(0, 0, W, H);
 
-  for (const zone of game.config.riskZones) {
-    ctx.fillStyle = "rgba(255, 196, 74, 0.26)";
-    ctx.strokeStyle = "rgba(255, 196, 74, 0.9)";
+  const vignette = ctx.createRadialGradient(W / 2, H / 2, 80, W / 2, H / 2, W * 0.62);
+  vignette.addColorStop(0, "rgba(10, 8, 26, 0.05)");
+  vignette.addColorStop(1, "rgba(9, 7, 24, 0.5)");
+  ctx.fillStyle = vignette;
+  ctx.fillRect(0, 0, W, H);
+
+  for (let i = 0; i < 24; i += 1) {
+    const sx = (i * 97 + now * 70) % W;
+    const sy = (i * 57 + now * 40) % H;
+    const twinkle = 0.25 + ((Math.sin(now * 2.2 + i) + 1) / 2) * 0.45;
+    ctx.fillStyle = `rgba(255,255,255,${twinkle})`;
+    ctx.fillRect(sx, sy, 2, 2);
+  }
+
+  game.config.riskZones.forEach((zone, idx) => {
+    const hue = (now * 90 + idx * 80) % 360;
+    ctx.fillStyle = `hsla(${hue}, 98%, 66%, 0.28)`;
+    ctx.strokeStyle = `hsla(${(hue + 55) % 360}, 100%, 76%, 0.96)`;
     ctx.lineWidth = 2;
     ctx.fillRect(zone.x, zone.y, zone.w, zone.h);
     ctx.strokeRect(zone.x, zone.y, zone.w, zone.h);
-  }
+  });
 
-  ctx.strokeStyle = "rgba(255,255,255,0.2)";
+  ctx.strokeStyle = "rgba(255,255,255,0.38)";
   ctx.setLineDash([8, 10]);
   ctx.beginPath();
   ctx.moveTo(W / 2, 0);
@@ -426,7 +469,17 @@ function drawObjects() {
     ctx.textAlign = "center";
     ctx.fillText(`P${game.lastScorer + 1} voitti!`, W / 2, H / 2 - 10);
     ctx.font = "20px 'Segoe UI', sans-serif";
-    ctx.fillText("Paina 'Aloita / Resetoi' pelataksesi uudelleen", W / 2, H / 2 + 28);
+    ctx.fillText("Paina aloita / resetoi pelataksesi uudelleen", W / 2, H / 2 + 28);
+    ctx.textAlign = "start";
+  }
+
+  if (!game.started) {
+    ctx.fillStyle = "rgba(0,0,0,0.5)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 36px 'Segoe UI', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("Paina aloita / resetoi pelataksesi uudelleen", W / 2, H / 2);
     ctx.textAlign = "start";
   }
 }
@@ -488,16 +541,16 @@ function setupInputs() {
   });
 
   startBtn.addEventListener("click", () => {
-    applyMode(modeSelect.value);
+    applyMode(modeSelect.value, { start: true });
   });
 
   modeSelect.addEventListener("change", () => {
-    applyMode(modeSelect.value);
+    applyMode(modeSelect.value, { start: false });
   });
 
   opponentSelect.addEventListener("change", () => {
     game.opponent = opponentSelect.value;
-    applyMode(modeSelect.value);
+    applyMode(modeSelect.value, { start: false });
   });
 
   sfxState.style.cursor = "pointer";
@@ -523,7 +576,7 @@ async function init() {
   modeSelect.value = "casual";
   opponentSelect.value = "human";
   game.opponent = opponentSelect.value;
-  applyMode("casual");
+  applyMode("casual", { start: false });
   setupInputs();
   loop();
 }
