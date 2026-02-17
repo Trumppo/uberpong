@@ -273,17 +273,30 @@ function updatePaddlesHuman() {
 }
 
 function spawnVictoryExplosion(winner) {
+  const loser = winner === 0 ? 1 : 0;
+  const loserPaddle = game.paddles[loser];
+  const cx = loserPaddle.x + loserPaddle.w / 2;
+  const cy = loserPaddle.y + loserPaddle.h / 2;
   const colors = ["#ff4fd8", "#ff9f43", "#ffe14f", "#62ff8a", "#30d9ff", "#8d66ff", "#ffffff"];
-  for (let i = 0; i < 36; i += 1) {
-    const x = Math.random() * W;
-    const y = Math.random() * H;
+
+  // Main blast: huge amount of particles launched from loser's paddle.
+  for (let i = 0; i < 120; i += 1) {
     const c = colors[i % colors.length];
-    const amount = 10 + Math.floor(Math.random() * 8);
-    const speed = 2.4 + Math.random() * 2.8;
-    spawnParticles(x, y, c, amount, speed);
+    const amount = 14 + Math.floor(Math.random() * 8);
+    const speed = 4.4 + Math.random() * 3.8;
+    spawnParticles(cx, cy, c, amount, speed);
   }
 
-  spawnParticles(W * (winner === 0 ? 0.25 : 0.75), H * 0.45, winner === 0 ? "#5be0ff" : "#ff6e9c", 52, 5.6);
+  // Secondary shockwaves across the field for a big victory finish.
+  for (let i = 0; i < 42; i += 1) {
+    const x = Math.random() * W;
+    const y = Math.random() * H;
+    const c = colors[(i + 3) % colors.length];
+    spawnParticles(x, y, c, 8 + Math.floor(Math.random() * 7), 2.2 + Math.random() * 2.6);
+  }
+
+  spawnParticles(cx, cy, "#ffffff", 90, 7.2);
+  spawnParticles(cx, cy, winner === 0 ? "#5be0ff" : "#ff6e9c", 80, 6.6);
   playTone(300, 0.07, "sawtooth", 0.08);
   playTone(450, 0.09, "square", 0.06);
   playTone(620, 0.11, "triangle", 0.05);
@@ -477,8 +490,6 @@ function drawObjects() {
   ctx.arc(game.puck.x, game.puck.y, game.puck.r, 0, Math.PI * 2);
   ctx.fill();
 
-  drawParticles();
-
   ctx.textAlign = "center";
   ctx.fillStyle = "rgba(91,224,255,0.95)";
   ctx.font = "700 15px 'Segoe UI', sans-serif";
@@ -513,6 +524,9 @@ function drawObjects() {
     ctx.fillText("Paina aloita / resetoi pelataksesi uudelleen", W / 2, H / 2);
     ctx.textAlign = "start";
   }
+
+  // Keep particles visible over overlays so victory blast can fade out naturally.
+  drawParticles();
 }
 
 function renderHud() {
