@@ -1,3 +1,6 @@
+import { clamp, lerp, reflectValue } from "./physics.js";
+import { getComboTier, getGoalSplashFrame, getTempoGainBoost } from "./spectacle.js";
+
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 
@@ -13,6 +16,7 @@ const enduranceValue = document.getElementById("enduranceValue");
 const bestValue = document.getElementById("bestValue");
 const aiState = document.getElementById("aiState");
 const sfxState = document.getElementById("sfxState");
+const uberFill = document.getElementById("uberFill");
 const mobileControls = document.getElementById("mobileControls");
 
 const W = canvas.width;
@@ -32,9 +36,12 @@ const game = {
   opponent: "human",
   paddles: [],
   puck: null,
+  puckTrail: [],
+  impactRings: [],
   particles: [],
   scores: [0, 0],
   combo: 0,
+  comboTier: 0,
   tempo: 0,
   rallyStart: performance.now(),
   enduranceCurrent: 0,
@@ -49,7 +56,13 @@ const game = {
   musicEnabled: true,
   musicStep: 0,
   musicTimer: null,
-  audioCtx: null
+  audioCtx: null,
+  shakePower: 0,
+  flashAlpha: 0,
+  hitFreezeFrames: 0,
+  slowMoFrames: 0,
+  slowMoTick: false,
+  goalSplashTimer: 0
 };
 
 function loadHighScore(modeKey) {
@@ -59,14 +72,6 @@ function loadHighScore(modeKey) {
 
 function saveHighScore(modeKey, value) {
   localStorage.setItem(`uberpong_best_${modeKey}`, String(value));
-}
-
-function clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value));
-}
-
-function lerp(from, to, t) {
-  return from + (to - from) * t;
 }
 
 function spawnParticles(x, y, color = "#ffffff", amount = 12, speed = 3) {
@@ -169,25 +174,31 @@ function playMusicTone(freq, duration = 0.1, type = "square", gain = 0.018) {
 function tickMusic() {
   const step = game.musicStep;
   game.musicStep += 1;
+  const gainBoost = getTempoGainBoost(game.tempo);
 
   const root = MUSIC_ROOTS[Math.floor(step / 4) % MUSIC_ROOTS.length];
   const leadOffset = MUSIC_LEAD[step % MUSIC_LEAD.length];
 
   if (step % 2 === 0) {
-    playMusicTone(midiToFreq(root - 12), 0.16, "square", 0.02);
+    playMusicTone(midiToFreq(root - 12), 0.16, "square", 0.02 * gainBoost);
   }
 
-  playMusicTone(midiToFreq(root + leadOffset), 0.11, step % 4 === 0 ? "triangle" : "square", 0.016);
+  playMusicTone(
+    midiToFreq(root + leadOffset),
+    0.11,
+    step % 4 === 0 ? "triangle" : "square",
+    0.016 * gainBoost
+  );
 
   if (step % 8 === 4) {
-    playMusicTone(midiToFreq(root + 12), 0.08, "sawtooth", 0.01);
+    playMusicTone(midiToFreq(root + 12), 0.08, "sawtooth", 0.01 * gainBoost);
   }
 }
 
 function ensureMusicLoop() {
   if (game.musicTimer !== null) return;
   game.musicTimer = window.setInterval(() => {
-    if (!game.started || !game.musicEnabled) return;
+    if (!game.started || game.ended || !game.musicEnabled) return;
     tickMusic();
   }, MUSIC_STEP_MS);
 }
@@ -239,15 +250,19 @@ function createPuck(servingPlayer = 0) {
 
 function resetRally(servingPlayer = 0) {
   game.combo = 0;
+  game.comboTier = 0;
   game.tempo = 0;
   game.riskZoneActive = false;
   game.rallyStart = performance.now();
   game.lastHitBy = servingPlayer;
   game.puck = createPuck(servingPlayer);
+  game.puckTrail = [];
+  game.impactRings = [];
   game.paddles.forEach((p) => {
     p.slapReady = false;
   });
   spawnParticles(W / 2, H / 2, "#9edcff", 20, 2.2);
+  addFlash(0.2);
 }
 
 function applyMode(modeKey, options = {}) {
@@ -288,8 +303,11 @@ function reflectFromPaddle(paddle, playerIndex) {
     nextSpeed = clamp(nextSpeed * game.mode.slapMultiplier, game.mode.basePuckSpeed, game.mode.maxPuckSpeed * 1.3);
     paddle.slapReady = false;
     paddle.slapCooldownUntil = performance.now() + game.mode.slapCooldownMs;
-    spawnParticles(game.puck.x, game.puck.y, "#ffe66f", 22, 3.6);
+    spawnParticles(game.puck.x, game.puck.y, "#ffe66f", 34, 4.2);
     playTone(250, 0.08, "triangle", 0.07);
+    addShake(2.8 + (game.tempo / 100) * 2.2);
+    addFlash(0.35 + (game.tempo / 100) * 0.2);
+    game.hitFreezeFrames = Math.max(game.hitFreezeFrames, 2);
   }
 
   const dir = playerIndex === 0 ? 1 : -1;
@@ -300,8 +318,16 @@ function reflectFromPaddle(paddle, playerIndex) {
   game.lastHitBy = playerIndex;
   game.tempo = clamp(game.tempo + 4.5, 0, 100);
 
-  spawnParticles(game.puck.x, game.puck.y, playerIndex === 0 ? "#5be0ff" : "#ff6e9c", 14, 2.6);
+  const nextTier = getComboTier(game.combo);
+  if (nextTier > game.comboTier) {
+    game.comboTier = nextTier;
+    onComboTierUp(nextTier, game.puck.x, game.puck.y);
+  }
+
+  spawnParticles(game.puck.x, game.puck.y, playerIndex === 0 ? "#5be0ff" : "#ff6e9c", 16, 2.6);
   playTone(440 + Math.min(game.combo, 12) * 16, 0.045, "square", 0.03);
+  addShake(0.6 + (game.tempo / 100) * 1.2);
+  addImpactRing(game.puck.x, game.puck.y, playerIndex === 0 ? "#5be0ff" : "#ff6e9c");
 }
 
 function checkRiskZones() {
@@ -391,17 +417,12 @@ function updatePaddleAI() {
   if (game.puck.vx > 0) {
     const minY = game.puck.r;
     const maxY = H - game.puck.r;
-    const range = Math.max(maxY - minY, 1);
     const timeToPaddle = (p2.x - game.puck.x) / game.puck.vx;
     let predictedY = game.puck.y;
 
     if (timeToPaddle > 0) {
       const rawY = game.puck.y + game.puck.vy * timeToPaddle;
-      const rel = rawY - minY;
-      const span = range * 2;
-      const mod = ((rel % span) + span) % span;
-      const reflected = mod > range ? span - mod : mod;
-      predictedY = minY + reflected;
+      predictedY = reflectValue(rawY, minY, maxY);
     }
 
     const errorPx = lerp(28, 4, intensity);
@@ -430,6 +451,112 @@ function updatePaddleAI() {
       p2.slapReady = true;
     }
   }
+}
+
+function addShake(amount) {
+  game.shakePower = Math.max(game.shakePower, amount);
+}
+
+function addFlash(amount) {
+  game.flashAlpha = Math.max(game.flashAlpha, amount);
+}
+
+function updateSpectacle() {
+  if (game.shakePower > 0) {
+    game.shakePower *= 0.82;
+    if (game.shakePower < 0.05) {
+      game.shakePower = 0;
+    }
+  }
+  if (game.flashAlpha > 0) {
+    game.flashAlpha = Math.max(0, game.flashAlpha - 0.06);
+  }
+  if (game.goalSplashTimer > 0) {
+    game.goalSplashTimer -= 1;
+  }
+}
+
+function updatePuckTrail() {
+  if (!game.started || game.ended || !game.puck) return;
+  game.puckTrail.push({ x: game.puck.x, y: game.puck.y, life: 1 });
+  game.puckTrail = game.puckTrail
+    .map((point) => ({
+      x: point.x,
+      y: point.y,
+      life: point.life - 0.08
+    }))
+    .filter((point) => point.life > 0);
+  if (game.puckTrail.length > 26) {
+    game.puckTrail.shift();
+  }
+}
+
+function drawPuckTrail() {
+  for (let i = 0; i < game.puckTrail.length; i += 1) {
+    const point = game.puckTrail[i];
+    const alpha = clamp(point.life, 0, 1);
+    const hue = 180 + i * 3;
+    ctx.fillStyle = `hsla(${hue}, 95%, 70%, ${alpha * 0.65})`;
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, 4 + i * 0.08, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function onComboTierUp(tier, x, y) {
+  const colors = ["#30d9ff", "#8d66ff", "#ff4fd8", "#ffe14f"];
+  const color = colors[Math.max(0, tier - 1) % colors.length];
+  spawnParticles(x, y, color, 36 + tier * 6, 4.2 + tier * 0.35);
+  addFlash(0.28 + tier * 0.06);
+  addShake(2 + tier * 0.6);
+  playTone(520 + tier * 90, 0.08, "triangle", 0.07);
+}
+
+function addImpactRing(x, y, color) {
+  game.impactRings.push({ x, y, r: 8, life: 1, color });
+}
+
+function updateImpactRings() {
+  game.impactRings = game.impactRings
+    .map((ring) => ({
+      x: ring.x,
+      y: ring.y,
+      r: ring.r + 3.4,
+      life: ring.life - 0.08,
+      color: ring.color
+    }))
+    .filter((ring) => ring.life > 0);
+  if (game.impactRings.length > 18) {
+    game.impactRings.shift();
+  }
+}
+
+function drawImpactRings() {
+  for (const ring of game.impactRings) {
+    ctx.strokeStyle = `${ring.color}${Math.floor(ring.life * 200)
+      .toString(16)
+      .padStart(2, "0")}`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(ring.x, ring.y, ring.r, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+}
+
+function drawGoalSplash() {
+  if (game.goalSplashTimer <= 0) return;
+  const { alpha, scale } = getGoalSplashFrame(game.goalSplashTimer, 42);
+  ctx.save();
+  ctx.translate(W / 2, H / 2 - 80);
+  ctx.scale(scale, scale);
+  ctx.textAlign = "center";
+  ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+  ctx.font = "bold 54px 'Segoe UI', sans-serif";
+  ctx.fillText("UBER GOAL!", 0, 0);
+  ctx.strokeStyle = `rgba(255, 79, 216, ${alpha * 0.9})`;
+  ctx.lineWidth = 3;
+  ctx.strokeText("UBER GOAL!", 0, 0);
+  ctx.restore();
 }
 
 function updatePuck() {
@@ -478,6 +605,19 @@ function updatePuck() {
 function onGoal(scorer) {
   spawnParticles(game.puck.x, game.puck.y, scorer === 0 ? "#5be0ff" : "#ff6e9c", 26, 4.4);
   playTone(scorer === 0 ? 220 : 180, 0.13, "square", 0.06);
+  addShake(3.5);
+  addFlash(0.25);
+  game.goalSplashTimer = 42;
+  game.slowMoFrames = 12;
+  game.slowMoTick = false;
+
+  const confetti = ["#30d9ff", "#8d66ff", "#ff4fd8", "#ffe14f", "#62ff8a"];
+  for (let i = 0; i < 6; i += 1) {
+    const cx = Math.random() * W;
+    const cy = Math.random() * H;
+    const c = confetti[i % confetti.length];
+    spawnParticles(cx, cy, c, 14, 3.8);
+  }
 
   if (game.modeKey === "endurance") {
     game.enduranceCurrent = (performance.now() - game.rallyStart) / 1000;
@@ -498,6 +638,8 @@ function onGoal(scorer) {
       spawnVictoryExplosion(scorer);
       game.victoryExplosionDone = true;
     }
+    playTone(720, 0.12, "sawtooth", 0.08);
+    playTone(520, 0.18, "triangle", 0.06);
     return;
   }
 
@@ -505,12 +647,33 @@ function onGoal(scorer) {
 }
 
 function update() {
+  if (game.hitFreezeFrames > 0) {
+    game.hitFreezeFrames -= 1;
+    updateParticles();
+    updateImpactRings();
+    updateSpectacle();
+    return;
+  }
+
+  if (game.slowMoFrames > 0) {
+    game.slowMoFrames -= 1;
+    game.slowMoTick = !game.slowMoTick;
+    if (!game.slowMoTick) {
+      updateParticles();
+      updateImpactRings();
+      updateSpectacle();
+      return;
+    }
+  }
+
   if (game.started && !game.ended) {
     updatePaddlesHuman();
     updatePaddleAI();
     updateTempo();
     updatePuck();
     checkRiskZones();
+    updatePuckTrail();
+    updateImpactRings();
 
     if (game.modeKey === "endurance") {
       game.enduranceCurrent = (performance.now() - game.rallyStart) / 1000;
@@ -522,13 +685,16 @@ function update() {
   }
 
   updateParticles();
+  updateImpactRings();
+  updateSpectacle();
 }
 
 function drawCourt() {
   ctx.clearRect(0, 0, W, H);
 
   const now = performance.now() * 0.001;
-  const pulse = 0.12 + (game.tempo / 100) * 0.22;
+  const tempoT = game.tempo / 100;
+  const pulse = 0.12 + tempoT * 0.28 + Math.sin(now * 3.4) * (0.05 + tempoT * 0.08);
 
   const rainbow = ctx.createLinearGradient(
     Math.cos(now * 0.3) * W * 0.35,
@@ -536,18 +702,18 @@ function drawCourt() {
     W + Math.sin(now * 0.35) * W * 0.35,
     H
   );
-  rainbow.addColorStop(0, `rgba(255, 70, 190, ${0.4 + pulse})`);
-  rainbow.addColorStop(0.18, `rgba(255, 142, 76, ${0.33 + pulse})`);
-  rainbow.addColorStop(0.36, `rgba(255, 225, 85, ${0.32 + pulse})`);
-  rainbow.addColorStop(0.54, `rgba(116, 255, 125, ${0.3 + pulse})`);
-  rainbow.addColorStop(0.72, `rgba(76, 223, 255, ${0.3 + pulse})`);
-  rainbow.addColorStop(1, `rgba(158, 108, 255, ${0.38 + pulse})`);
+  rainbow.addColorStop(0, `rgba(255, 70, 190, ${0.35 + pulse})`);
+  rainbow.addColorStop(0.18, `rgba(255, 142, 76, ${0.3 + pulse})`);
+  rainbow.addColorStop(0.36, `rgba(255, 225, 85, ${0.28 + pulse})`);
+  rainbow.addColorStop(0.54, `rgba(116, 255, 125, ${0.26 + pulse})`);
+  rainbow.addColorStop(0.72, `rgba(76, 223, 255, ${0.26 + pulse})`);
+  rainbow.addColorStop(1, `rgba(158, 108, 255, ${0.34 + pulse})`);
   ctx.fillStyle = rainbow;
   ctx.fillRect(0, 0, W, H);
 
   const vignette = ctx.createRadialGradient(W / 2, H / 2, 80, W / 2, H / 2, W * 0.62);
-  vignette.addColorStop(0, "rgba(10, 8, 26, 0.05)");
-  vignette.addColorStop(1, "rgba(9, 7, 24, 0.5)");
+  vignette.addColorStop(0, `rgba(10, 8, 26, ${0.05 + tempoT * 0.08})`);
+  vignette.addColorStop(1, `rgba(9, 7, 24, ${0.5 + tempoT * 0.16})`);
   ctx.fillStyle = vignette;
   ctx.fillRect(0, 0, W, H);
 
@@ -561,9 +727,10 @@ function drawCourt() {
 
   game.config.riskZones.forEach((zone, idx) => {
     const hue = (now * 90 + idx * 80) % 360;
-    ctx.fillStyle = `hsla(${hue}, 98%, 66%, 0.28)`;
-    ctx.strokeStyle = `hsla(${(hue + 55) % 360}, 100%, 76%, 0.96)`;
-    ctx.lineWidth = 2;
+    const glow = 0.22 + tempoT * 0.28 + Math.sin(now * 4 + idx) * 0.12;
+    ctx.fillStyle = `hsla(${hue}, 98%, 66%, ${0.2 + glow})`;
+    ctx.strokeStyle = `hsla(${(hue + 55) % 360}, 100%, 76%, ${0.7 + glow})`;
+    ctx.lineWidth = 2 + tempoT * 1.8;
     ctx.fillRect(zone.x, zone.y, zone.w, zone.h);
     ctx.strokeRect(zone.x, zone.y, zone.w, zone.h);
   });
@@ -583,12 +750,18 @@ function drawObjects() {
     ctx.fillRect(p.x, p.y, p.w, p.h);
 
     if (p.slapReady) {
-      ctx.strokeStyle = "#ffe66f";
+      const glow = 0.4 + (game.tempo / 100) * 0.6;
+      ctx.strokeStyle = `rgba(255, 230, 111, ${glow})`;
       ctx.lineWidth = 3;
       ctx.strokeRect(p.x - 3, p.y - 3, p.w + 6, p.h + 6);
+      ctx.strokeStyle = `rgba(255, 160, 80, ${glow * 0.7})`;
+      ctx.lineWidth = 6;
+      ctx.strokeRect(p.x - 6, p.y - 6, p.w + 12, p.h + 12);
     }
   });
 
+  drawImpactRings();
+  drawPuckTrail();
   ctx.fillStyle = game.puck.color;
   ctx.beginPath();
   ctx.arc(game.puck.x, game.puck.y, game.puck.r, 0, Math.PI * 2);
@@ -631,6 +804,7 @@ function drawObjects() {
 
   // Keep particles visible over overlays so victory blast can fade out naturally.
   drawParticles();
+  drawGoalSplash();
 
   ctx.fillStyle = "rgba(245, 242, 255, 0.75)";
   ctx.font = "12px 'Segoe UI', sans-serif";
@@ -648,12 +822,28 @@ function renderHud() {
   bestValue.textContent = `${game.enduranceBest.toFixed(1)}s`;
   aiState.textContent = game.opponent === "ai" ? "ON" : "OFF";
   sfxState.textContent = game.sfxEnabled ? "ON" : "OFF";
+  if (uberFill) {
+    const fill = clamp(game.tempo, 0, 100);
+    uberFill.style.width = `${fill}%`;
+    uberFill.classList.toggle("is-hot", fill >= 90);
+  }
 }
 
 function loop() {
   update();
+  const shake = game.shakePower;
+  const shakeX = shake ? (Math.random() * 2 - 1) * shake : 0;
+  const shakeY = shake ? (Math.random() * 2 - 1) * shake : 0;
+
+  ctx.save();
+  ctx.translate(shakeX, shakeY);
   drawCourt();
   drawObjects();
+  if (game.flashAlpha > 0) {
+    ctx.fillStyle = `rgba(255, 255, 255, ${game.flashAlpha})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+  ctx.restore();
   renderHud();
   requestAnimationFrame(loop);
 }

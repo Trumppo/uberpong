@@ -98,6 +98,43 @@ button:hover { filter: brightness(1.08) saturate(1.1); }
 }
 .stat-grid span { color: var(--accent); font-weight: 800; text-shadow: 0 0 10px rgba(0, 228, 255, 0.38); }
 
+.uber-meter {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.uber-label {
+  font-size: 0.9rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.uber-bar {
+  position: relative;
+  height: 12px;
+  border-radius: 999px;
+  background: rgba(10, 8, 26, 0.72);
+  border: 1px solid rgba(133, 161, 255, 0.35);
+  overflow: hidden;
+  box-shadow: inset 0 0 10px rgba(11, 10, 26, 0.7);
+}
+
+#uberFill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #30d9ff 0%, #8d66ff 50%, #ff4fd8 100%);
+  box-shadow: 0 0 14px rgba(48, 217, 255, 0.7);
+  transition: width 120ms ease-out, box-shadow 120ms ease-out;
+}
+
+#uberFill.is-hot {
+  box-shadow:
+    0 0 16px rgba(255, 79, 216, 0.8),
+    0 0 24px rgba(255, 217, 61, 0.6);
+}
+
 .legend h2 { margin: 0 0 8px; font-size: 1rem; }
 .legend ul { margin: 0; padding-left: 20px; color: var(--muted); }
 .legend code {

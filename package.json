@@ -1,0 +1,15 @@
+{
+  "name": "uberpong",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "test:all": "vitest run && playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.1",
+    "http-server": "^14.1.1",
+    "vitest": "^1.6.0"
+  }
+}
