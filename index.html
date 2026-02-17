@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="fi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>UBERPONG: Pinball Court</title>
+  <link rel="stylesheet" href="styles/main.css" />
+</head>
+<body>
+  <main class="layout">
+    <section class="hud-card">
+      <h1>UBERPONG: Pinball Court</h1>
+      <p class="subtitle">Pong, mutta uberöitynä: tempo, kombo, riskialueet ja Slap Shot.</p>
+
+      <div class="controls-grid">
+        <label>
+          Pelimuoto
+          <select id="modeSelect"></select>
+        </label>
+        <button id="startBtn">Aloita / Resetoi</button>
+      </div>
+
+      <div class="stat-grid">
+        <div><strong>Tempo</strong><span id="tempoValue">0</span></div>
+        <div><strong>Kombo</strong><span id="comboValue">0</span></div>
+        <div><strong>P1 pisteet</strong><span id="p1Score">0</span></div>
+        <div><strong>P2 pisteet</strong><span id="p2Score">0</span></div>
+        <div><strong>Endurance</strong><span id="enduranceValue">0.0s</span></div>
+        <div><strong>Paras</strong><span id="bestValue">0.0s</span></div>
+      </div>
+
+      <div class="legend">
+        <h2>Ohjaimet</h2>
+        <ul>
+          <li><code>W</code> / <code>S</code>: P1 ylös/alas</li>
+          <li><code>↑</code> / <code>↓</code>: P2 ylös/alas</li>
+          <li><code>Shift</code>: P1 Slap Shot (cooldown)</li>
+          <li><code>Enter</code>: P2 Slap Shot (cooldown)</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="game-card">
+      <canvas id="gameCanvas" width="960" height="540" aria-label="UBERPONG pelialue"></canvas>
+      <p class="help">Keltaiset alueet ovat riskialueita: osumasta lisäpisteitä aktiiviselle lyöjälle.</p>
+    </section>
+  </main>
+
+  <script type="module" src="src/game.js"></script>
+</body>
+</html>

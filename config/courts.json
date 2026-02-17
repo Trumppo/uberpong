@@ -1,0 +1,41 @@
+{
+  "modes": {
+    "casual": {
+      "label": "Casual",
+      "pointsToWin": 11,
+      "basePuckSpeed": 5.3,
+      "maxPuckSpeed": 11.5,
+      "tempoRamp": 0.07,
+      "wallBounceBoost": 0.12,
+      "riskBonus": 1,
+      "slapMultiplier": 1.5,
+      "slapCooldownMs": 5000
+    },
+    "arena": {
+      "label": "Arena",
+      "pointsToWin": 15,
+      "basePuckSpeed": 6.1,
+      "maxPuckSpeed": 13.5,
+      "tempoRamp": 0.1,
+      "wallBounceBoost": 0.2,
+      "riskBonus": 2,
+      "slapMultiplier": 1.7,
+      "slapCooldownMs": 4500
+    },
+    "endurance": {
+      "label": "Endurance",
+      "pointsToWin": 999,
+      "basePuckSpeed": 6,
+      "maxPuckSpeed": 14,
+      "tempoRamp": 0.11,
+      "wallBounceBoost": 0.24,
+      "riskBonus": 0,
+      "slapMultiplier": 1.6,
+      "slapCooldownMs": 5000
+    }
+  },
+  "riskZones": [
+    { "x": 415, "y": 56, "w": 130, "h": 24 },
+    { "x": 415, "y": 460, "w": 130, "h": 24 }
+  ]
+}
