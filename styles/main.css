@@ -101,6 +101,34 @@ canvas {
 }
 .help { margin: 0; color: var(--muted); font-size: 0.9rem; }
 
+.mobile-controls {
+  display: none;
+  gap: 10px;
+  grid-template-columns: 1fr 1fr;
+}
+
+.mobile-col {
+  display: grid;
+  gap: 8px;
+}
+
+.mobile-controls button {
+  background: linear-gradient(120deg, #233243, #1b2532);
+  border: 1px solid #3c546f;
+  color: #d6e7fa;
+  padding: 12px;
+  user-select: none;
+  touch-action: manipulation;
+}
+
+.mobile-controls button:active {
+  filter: brightness(1.2);
+}
+
 @media (max-width: 1024px) {
   .layout { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 768px) {
+  .mobile-controls { display: grid; }
 }

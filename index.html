@@ -17,6 +17,13 @@
           Pelimuoto
           <select id="modeSelect"></select>
         </label>
+        <label>
+          Vastustaja
+          <select id="opponentSelect">
+            <option value="human">Ihminen (2P)</option>
+            <option value="ai">AI (1P)</option>
+          </select>
+        </label>
         <button id="startBtn">Aloita / Resetoi</button>
       </div>
 
@@ -27,6 +34,8 @@
         <div><strong>P2 pisteet</strong><span id="p2Score">0</span></div>
         <div><strong>Endurance</strong><span id="enduranceValue">0.0s</span></div>
         <div><strong>Paras</strong><span id="bestValue">0.0s</span></div>
+        <div><strong>AI</strong><span id="aiState">OFF</span></div>
+        <div><strong>SFX</strong><span id="sfxState">ON</span></div>
       </div>
 
       <div class="legend">
@@ -36,12 +45,25 @@
           <li><code>↑</code> / <code>↓</code>: P2 ylös/alas</li>
           <li><code>Shift</code>: P1 Slap Shot (cooldown)</li>
           <li><code>Enter</code>: P2 Slap Shot (cooldown)</li>
+          <li>Mobiili: näytön alareunan napit</li>
         </ul>
       </div>
     </section>
 
     <section class="game-card">
       <canvas id="gameCanvas" width="960" height="540" aria-label="UBERPONG pelialue"></canvas>
+      <div class="mobile-controls" id="mobileControls">
+        <div class="mobile-col">
+          <button data-hold="KeyW">P1 ▲</button>
+          <button data-hold="KeyS">P1 ▼</button>
+          <button data-hold="ShiftLeft">P1 SLAP</button>
+        </div>
+        <div class="mobile-col">
+          <button data-hold="ArrowUp">P2 ▲</button>
+          <button data-hold="ArrowDown">P2 ▼</button>
+          <button data-hold="Enter">P2 SLAP</button>
+        </div>
+      </div>
       <p class="help">Keltaiset alueet ovat riskialueita: osumasta lisäpisteitä aktiiviselle lyöjälle.</p>
     </section>
   </main>

@@ -15,6 +15,11 @@ UBERPONG on Pongin moderni, taitopohjainen ja "uberöity" tulkinta. Toteutus on 
   - Riskialueet (bonuspisteet)
   - Slap Shot (aktiivikyky cooldownilla)
   - Pelimuodot: Casual, Arena, Endurance
+  - Vaihe 2:
+    - AI-vastustaja (1P moodi)
+    - Partikkeliefektit osumiin/maaleihin
+    - Kevyt WebAudio-SFX (M = mute/unmute)
+    - Mobiilikontrollit (on-screen painikkeet)
 
 ## Käynnistys
 
@@ -33,6 +38,8 @@ Sitten avaa `http://localhost:8080`.
 - P2: `ArrowUp` / `ArrowDown`
 - P1 Slap Shot: `Shift`
 - P2 Slap Shot: `Enter`
+- SFX mute/unmute: `M`
+- Mobiili: ruudun alalaidan virtuaalinapit
 
 ## Konfigurointi
 

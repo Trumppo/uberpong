@@ -2,6 +2,7 @@ const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 
 const modeSelect = document.getElementById("modeSelect");
+const opponentSelect = document.getElementById("opponentSelect");
 const startBtn = document.getElementById("startBtn");
 
 const tempoValue = document.getElementById("tempoValue");
@@ -10,6 +11,9 @@ const p1Score = document.getElementById("p1Score");
 const p2Score = document.getElementById("p2Score");
 const enduranceValue = document.getElementById("enduranceValue");
 const bestValue = document.getElementById("bestValue");
+const aiState = document.getElementById("aiState");
+const sfxState = document.getElementById("sfxState");
+const mobileControls = document.getElementById("mobileControls");
 
 const W = canvas.width;
 const H = canvas.height;
@@ -19,8 +23,10 @@ const game = {
   config: null,
   modeKey: "casual",
   mode: null,
+  opponent: "human",
   paddles: [],
   puck: null,
+  particles: [],
   scores: [0, 0],
   combo: 0,
   tempo: 0,
@@ -29,7 +35,9 @@ const game = {
   enduranceBest: 0,
   lastScorer: 0,
   lastHitBy: 0,
-  ended: false
+  ended: false,
+  sfxEnabled: true,
+  audioCtx: null
 };
 
 function loadHighScore(modeKey) {
@@ -43,6 +51,69 @@ function saveHighScore(modeKey, value) {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function spawnParticles(x, y, color = "#ffffff", amount = 12, speed = 3) {
+  for (let i = 0; i < amount; i += 1) {
+    const angle = Math.random() * Math.PI * 2;
+    const vel = (0.6 + Math.random()) * speed;
+    game.particles.push({
+      x,
+      y,
+      vx: Math.cos(angle) * vel,
+      vy: Math.sin(angle) * vel,
+      life: 30 + Math.random() * 18,
+      color,
+      size: 1 + Math.random() * 2.5
+    });
+  }
+}
+
+function updateParticles() {
+  game.particles.forEach((p) => {
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vx *= 0.98;
+    p.vy *= 0.98;
+    p.life -= 1;
+  });
+  game.particles = game.particles.filter((p) => p.life > 0);
+}
+
+function drawParticles() {
+  for (const p of game.particles) {
+    const alpha = clamp(p.life / 48, 0, 1);
+    ctx.fillStyle = `${p.color}${Math.floor(alpha * 255)
+      .toString(16)
+      .padStart(2, "0")}`;
+    ctx.fillRect(p.x, p.y, p.size, p.size);
+  }
+}
+
+function getAudioCtx() {
+  if (!game.audioCtx) {
+    game.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  return game.audioCtx;
+}
+
+function playTone(freq = 440, duration = 0.06, type = "sine", gain = 0.05) {
+  if (!game.sfxEnabled) return;
+  try {
+    const ctxAudio = getAudioCtx();
+    const o = ctxAudio.createOscillator();
+    const g = ctxAudio.createGain();
+    o.type = type;
+    o.frequency.value = freq;
+    g.gain.value = gain;
+    o.connect(g);
+    g.connect(ctxAudio.destination);
+    o.start();
+    g.gain.exponentialRampToValueAtTime(0.0001, ctxAudio.currentTime + duration);
+    o.stop(ctxAudio.currentTime + duration);
+  } catch (_err) {
+    // Browser may block audio before first interaction.
+  }
 }
 
 function createPaddles() {
@@ -78,7 +149,7 @@ function createPaddles() {
 
 function createPuck(servingPlayer = 0) {
   const dir = servingPlayer === 0 ? 1 : -1;
-  const angle = (Math.random() * 0.8 - 0.4);
+  const angle = Math.random() * 0.8 - 0.4;
   const speed = game.mode.basePuckSpeed;
   return {
     x: W / 2,
@@ -99,6 +170,7 @@ function resetRally(servingPlayer = 0) {
   game.paddles.forEach((p) => {
     p.slapReady = false;
   });
+  spawnParticles(W / 2, H / 2, "#9edcff", 20, 2.2);
 }
 
 function applyMode(modeKey) {
@@ -108,6 +180,7 @@ function applyMode(modeKey) {
   game.enduranceCurrent = 0;
   game.enduranceBest = loadHighScore(modeKey);
   game.ended = false;
+  game.particles = [];
   game.paddles = createPaddles();
   resetRally(0);
 }
@@ -130,6 +203,8 @@ function reflectFromPaddle(paddle, playerIndex) {
     nextSpeed = clamp(nextSpeed * game.mode.slapMultiplier, game.mode.basePuckSpeed, game.mode.maxPuckSpeed * 1.3);
     paddle.slapReady = false;
     paddle.slapCooldownUntil = performance.now() + game.mode.slapCooldownMs;
+    spawnParticles(game.puck.x, game.puck.y, "#ffe66f", 22, 3.6);
+    playTone(250, 0.08, "triangle", 0.07);
   }
 
   const dir = playerIndex === 0 ? 1 : -1;
@@ -139,6 +214,9 @@ function reflectFromPaddle(paddle, playerIndex) {
   game.combo += 1;
   game.lastHitBy = playerIndex;
   game.tempo = clamp(game.tempo + 4.5, 0, 100);
+
+  spawnParticles(game.puck.x, game.puck.y, playerIndex === 0 ? "#5be0ff" : "#ff6e9c", 14, 2.6);
+  playTone(440 + Math.min(game.combo, 12) * 16, 0.045, "square", 0.03);
 }
 
 function checkRiskZones() {
@@ -157,13 +235,17 @@ function checkRiskZones() {
       const scale = boosted / (speed || 1);
       game.puck.vx *= scale;
       game.puck.vy *= scale;
+      spawnParticles(game.puck.x, game.puck.y, "#ffc24a", 16, 2.8);
+      playTone(600, 0.03, "sawtooth", 0.03);
       break;
     }
   }
 }
 
-function updatePaddles() {
-  game.paddles.forEach((p) => {
+function updatePaddlesHuman() {
+  game.paddles.forEach((p, idx) => {
+    if (game.opponent === "ai" && idx === 1) return;
+
     if (keys.has(p.upKey)) p.y -= p.speed;
     if (keys.has(p.downKey)) p.y += p.speed;
     p.y = clamp(p.y, 0, H - p.h);
@@ -174,6 +256,32 @@ function updatePaddles() {
   });
 }
 
+function updatePaddleAI() {
+  if (game.opponent !== "ai") return;
+
+  const p2 = game.paddles[1];
+  const reaction = 0.08 + (game.tempo / 100) * 0.12;
+  const targetY = game.puck.y - p2.h / 2;
+
+  if (game.puck.vx > 0) {
+    p2.y += clamp((targetY - p2.y) * reaction, -p2.speed, p2.speed);
+  } else {
+    const neutral = H / 2 - p2.h / 2;
+    p2.y += clamp((neutral - p2.y) * 0.06, -p2.speed * 0.6, p2.speed * 0.6);
+  }
+
+  p2.y = clamp(p2.y, 0, H - p2.h);
+
+  if (
+    performance.now() >= p2.slapCooldownUntil &&
+    game.puck.vx > 0 &&
+    game.puck.x > W * 0.65 &&
+    Math.abs(game.puck.y - (p2.y + p2.h / 2)) < p2.h * 0.22
+  ) {
+    p2.slapReady = true;
+  }
+}
+
 function updatePuck() {
   game.puck.x += game.puck.vx;
   game.puck.y += game.puck.vy;
@@ -182,6 +290,8 @@ function updatePuck() {
     const wallBoost = 1 + (game.tempo / 100) * game.mode.wallBounceBoost;
     game.puck.vy *= -wallBoost;
     game.puck.vy = clamp(game.puck.vy, -game.mode.maxPuckSpeed, game.mode.maxPuckSpeed);
+    spawnParticles(game.puck.x, clamp(game.puck.y, 0, H), "#9ac6ff", 10, 2.2);
+    playTone(320, 0.02, "triangle", 0.02);
   }
 
   const p1 = game.paddles[0];
@@ -216,6 +326,9 @@ function updatePuck() {
 }
 
 function onGoal(scorer) {
+  spawnParticles(game.puck.x, game.puck.y, scorer === 0 ? "#5be0ff" : "#ff6e9c", 26, 4.4);
+  playTone(scorer === 0 ? 220 : 180, 0.13, "square", 0.06);
+
   if (game.modeKey === "endurance") {
     game.enduranceCurrent = (performance.now() - game.rallyStart) / 1000;
     if (game.enduranceCurrent > game.enduranceBest) {
@@ -238,20 +351,23 @@ function onGoal(scorer) {
 }
 
 function update() {
-  if (game.ended) return;
+  if (!game.ended) {
+    updatePaddlesHuman();
+    updatePaddleAI();
+    updateTempo();
+    updatePuck();
+    checkRiskZones();
 
-  updatePaddles();
-  updateTempo();
-  updatePuck();
-  checkRiskZones();
-
-  if (game.modeKey === "endurance") {
-    game.enduranceCurrent = (performance.now() - game.rallyStart) / 1000;
-    if (game.enduranceCurrent > game.enduranceBest) {
-      game.enduranceBest = game.enduranceCurrent;
-      saveHighScore(game.modeKey, game.enduranceBest);
+    if (game.modeKey === "endurance") {
+      game.enduranceCurrent = (performance.now() - game.rallyStart) / 1000;
+      if (game.enduranceCurrent > game.enduranceBest) {
+        game.enduranceBest = game.enduranceCurrent;
+        saveHighScore(game.modeKey, game.enduranceBest);
+      }
     }
   }
+
+  updateParticles();
 }
 
 function drawCourt() {
@@ -295,6 +411,8 @@ function drawObjects() {
   ctx.arc(game.puck.x, game.puck.y, game.puck.r, 0, Math.PI * 2);
   ctx.fill();
 
+  drawParticles();
+
   ctx.fillStyle = "rgba(235,242,250,0.82)";
   ctx.font = "bold 36px 'Segoe UI', sans-serif";
   ctx.fillText(String(game.scores[0]), W * 0.25, 56);
@@ -320,6 +438,8 @@ function renderHud() {
   p2Score.textContent = String(game.scores[1]);
   enduranceValue.textContent = `${game.enduranceCurrent.toFixed(1)}s`;
   bestValue.textContent = `${game.enduranceBest.toFixed(1)}s`;
+  aiState.textContent = game.opponent === "ai" ? "ON" : "OFF";
+  sfxState.textContent = game.sfxEnabled ? "ON" : "OFF";
 }
 
 function loop() {
@@ -330,11 +450,36 @@ function loop() {
   requestAnimationFrame(loop);
 }
 
+function bindHoldButton(btn) {
+  const code = btn.dataset.hold;
+  if (!code) return;
+
+  const down = (ev) => {
+    ev.preventDefault();
+    keys.add(code);
+    playTone(520, 0.02, "sine", 0.01);
+  };
+  const up = (ev) => {
+    ev.preventDefault();
+    keys.delete(code);
+  };
+
+  btn.addEventListener("touchstart", down, { passive: false });
+  btn.addEventListener("touchend", up, { passive: false });
+  btn.addEventListener("touchcancel", up, { passive: false });
+  btn.addEventListener("mousedown", down);
+  btn.addEventListener("mouseup", up);
+  btn.addEventListener("mouseleave", up);
+}
+
 function setupInputs() {
   window.addEventListener("keydown", (ev) => {
     keys.add(ev.code);
     if (["ArrowUp", "ArrowDown", "Space"].includes(ev.code)) {
       ev.preventDefault();
+    }
+    if (ev.code === "KeyM") {
+      game.sfxEnabled = !game.sfxEnabled;
     }
   });
 
@@ -349,14 +494,26 @@ function setupInputs() {
   modeSelect.addEventListener("change", () => {
     applyMode(modeSelect.value);
   });
+
+  opponentSelect.addEventListener("change", () => {
+    game.opponent = opponentSelect.value;
+    applyMode(modeSelect.value);
+  });
+
+  sfxState.style.cursor = "pointer";
+  sfxState.addEventListener("click", () => {
+    game.sfxEnabled = !game.sfxEnabled;
+  });
+
+  mobileControls.querySelectorAll("button[data-hold]").forEach(bindHoldButton);
 }
 
 async function init() {
   const response = await fetch("./config/courts.json");
   game.config = await response.json();
 
-  const keys = Object.keys(game.config.modes);
-  keys.forEach((key) => {
+  const modeKeys = Object.keys(game.config.modes);
+  modeKeys.forEach((key) => {
     const option = document.createElement("option");
     option.value = key;
     option.textContent = game.config.modes[key].label;
@@ -364,6 +521,8 @@ async function init() {
   });
 
   modeSelect.value = "casual";
+  opponentSelect.value = "human";
+  game.opponent = opponentSelect.value;
   applyMode("casual");
   setupInputs();
   loop();
