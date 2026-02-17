@@ -124,7 +124,7 @@ function resumeAudioContext() {
     if (ctxAudio.state === "suspended") {
       ctxAudio.resume();
     }
-  } catch (_err) {
+  } catch {
     // Ignore audio resume failures.
   }
 }
@@ -147,7 +147,7 @@ function playTone(freq = 440, duration = 0.06, type = "sine", gain = 0.05) {
     o.start();
     g.gain.exponentialRampToValueAtTime(0.0001, ctxAudio.currentTime + duration);
     o.stop(ctxAudio.currentTime + duration);
-  } catch (_err) {
+  } catch {
     // Browser may block audio before first interaction.
   }
 }
@@ -166,7 +166,7 @@ function playMusicTone(freq, duration = 0.1, type = "square", gain = 0.018) {
     o.start();
     g.gain.exponentialRampToValueAtTime(0.0001, ctxAudio.currentTime + duration);
     o.stop(ctxAudio.currentTime + duration);
-  } catch (_err) {
+  } catch {
     // Ignore audio failures.
   }
 }

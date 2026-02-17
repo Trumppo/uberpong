@@ -3,12 +3,16 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "lint": "eslint .",
     "test": "vitest run",
     "test:e2e": "playwright test",
     "test:all": "vitest run && playwright test"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.1",
+    "@eslint/js": "^9.20.0",
+    "eslint": "^9.20.1",
+    "globals": "^15.14.0",
     "http-server": "^14.1.1",
     "vitest": "^1.6.0"
   }
