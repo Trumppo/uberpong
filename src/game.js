@@ -18,8 +18,12 @@ const mobileControls = document.getElementById("mobileControls");
 const W = canvas.width;
 const H = canvas.height;
 const keys = new Set();
-const GAME_VERSION = { major: 1, minor: 1 };
+const GAME_VERSION = { major: 1, minor: 2 };
 const GAME_VERSION_LABEL = `v${GAME_VERSION.major}.${GAME_VERSION.minor}`;
+const MUSIC_BPM = 168;
+const MUSIC_STEP_MS = Math.round((60000 / MUSIC_BPM) / 4);
+const MUSIC_ROOTS = [57, 57, 60, 60, 62, 62, 55, 55];
+const MUSIC_LEAD = [0, 7, 12, 7, 2, 9, 14, 9, 4, 11, 16, 11, 2, 9, 14, 7];
 
 const game = {
   config: null,
@@ -42,6 +46,9 @@ const game = {
   riskZoneActive: false,
   victoryExplosionDone: false,
   sfxEnabled: true,
+  musicEnabled: true,
+  musicStep: 0,
+  musicTimer: null,
   audioCtx: null
 };
 
@@ -102,6 +109,21 @@ function getAudioCtx() {
   return game.audioCtx;
 }
 
+function resumeAudioContext() {
+  try {
+    const ctxAudio = getAudioCtx();
+    if (ctxAudio.state === "suspended") {
+      ctxAudio.resume();
+    }
+  } catch (_err) {
+    // Ignore audio resume failures.
+  }
+}
+
+function midiToFreq(midi) {
+  return 440 * (2 ** ((midi - 69) / 12));
+}
+
 function playTone(freq = 440, duration = 0.06, type = "sine", gain = 0.05) {
   if (!game.sfxEnabled) return;
   try {
@@ -119,6 +141,51 @@ function playTone(freq = 440, duration = 0.06, type = "sine", gain = 0.05) {
   } catch (_err) {
     // Browser may block audio before first interaction.
   }
+}
+
+function playMusicTone(freq, duration = 0.1, type = "square", gain = 0.018) {
+  if (!game.musicEnabled) return;
+  try {
+    const ctxAudio = getAudioCtx();
+    const o = ctxAudio.createOscillator();
+    const g = ctxAudio.createGain();
+    o.type = type;
+    o.frequency.value = freq;
+    g.gain.value = gain;
+    o.connect(g);
+    g.connect(ctxAudio.destination);
+    o.start();
+    g.gain.exponentialRampToValueAtTime(0.0001, ctxAudio.currentTime + duration);
+    o.stop(ctxAudio.currentTime + duration);
+  } catch (_err) {
+    // Ignore audio failures.
+  }
+}
+
+function tickMusic() {
+  const step = game.musicStep;
+  game.musicStep += 1;
+
+  const root = MUSIC_ROOTS[Math.floor(step / 4) % MUSIC_ROOTS.length];
+  const leadOffset = MUSIC_LEAD[step % MUSIC_LEAD.length];
+
+  if (step % 2 === 0) {
+    playMusicTone(midiToFreq(root - 12), 0.16, "square", 0.02);
+  }
+
+  playMusicTone(midiToFreq(root + leadOffset), 0.11, step % 4 === 0 ? "triangle" : "square", 0.016);
+
+  if (step % 8 === 4) {
+    playMusicTone(midiToFreq(root + 12), 0.08, "sawtooth", 0.01);
+  }
+}
+
+function ensureMusicLoop() {
+  if (game.musicTimer !== null) return;
+  game.musicTimer = window.setInterval(() => {
+    if (!game.started || !game.musicEnabled) return;
+    tickMusic();
+  }, MUSIC_STEP_MS);
 }
 
 function createPaddles() {
@@ -188,6 +255,7 @@ function applyMode(modeKey, options = {}) {
   game.enduranceBest = loadHighScore(modeKey);
   game.ended = false;
   game.victoryExplosionDone = false;
+  game.musicStep = 0;
   game.started = start;
   game.particles = [];
   game.paddles = createPaddles();
@@ -562,6 +630,7 @@ function bindHoldButton(btn) {
 
   const down = (ev) => {
     ev.preventDefault();
+    resumeAudioContext();
     keys.add(code);
     playTone(520, 0.02, "sine", 0.01);
   };
@@ -580,12 +649,16 @@ function bindHoldButton(btn) {
 
 function setupInputs() {
   window.addEventListener("keydown", (ev) => {
+    resumeAudioContext();
     keys.add(ev.code);
     if (["ArrowUp", "ArrowDown", "Space"].includes(ev.code)) {
       ev.preventDefault();
     }
     if (ev.code === "KeyM") {
       game.sfxEnabled = !game.sfxEnabled;
+    }
+    if (ev.code === "KeyB") {
+      game.musicEnabled = !game.musicEnabled;
     }
   });
 
@@ -594,7 +667,9 @@ function setupInputs() {
   });
 
   startBtn.addEventListener("click", () => {
+    resumeAudioContext();
     applyMode(modeSelect.value, { start: true });
+    ensureMusicLoop();
   });
 
   modeSelect.addEventListener("change", () => {
