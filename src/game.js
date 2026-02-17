@@ -65,6 +65,10 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+function lerp(from, to, t) {
+  return from + (to - from) * t;
+}
+
 function spawnParticles(x, y, color = "#ffffff", amount = 12, speed = 3) {
   for (let i = 0; i < amount; i += 1) {
     const angle = Math.random() * Math.PI * 2;
@@ -376,14 +380,37 @@ function updatePaddleAI() {
   if (game.opponent !== "ai") return;
 
   const p2 = game.paddles[1];
-  const reaction = 0.08 + (game.tempo / 100) * 0.12;
-  const targetY = game.puck.y - p2.h / 2;
+  const tempoT = clamp(game.tempo / 100, 0, 1);
+  const comboT = clamp(game.combo / 18, 0, 1);
+  const rallyT = clamp((performance.now() - game.rallyStart) / 12000, 0, 1);
+  const intensity = clamp(0.25 + 0.35 * tempoT + 0.2 * comboT + 0.15 * rallyT, 0, 1);
+  const reaction = lerp(0.06, 0.18, intensity);
+  const maxStep = p2.speed * lerp(0.6, 1.15, intensity);
+  let targetY = game.puck.y;
 
   if (game.puck.vx > 0) {
-    p2.y += clamp((targetY - p2.y) * reaction, -p2.speed, p2.speed);
+    const minY = game.puck.r;
+    const maxY = H - game.puck.r;
+    const range = Math.max(maxY - minY, 1);
+    const timeToPaddle = (p2.x - game.puck.x) / game.puck.vx;
+    let predictedY = game.puck.y;
+
+    if (timeToPaddle > 0) {
+      const rawY = game.puck.y + game.puck.vy * timeToPaddle;
+      const rel = rawY - minY;
+      const span = range * 2;
+      const mod = ((rel % span) + span) % span;
+      const reflected = mod > range ? span - mod : mod;
+      predictedY = minY + reflected;
+    }
+
+    const errorPx = lerp(28, 4, intensity);
+    predictedY += (Math.random() * 2 - 1) * errorPx;
+    targetY = lerp(game.puck.y, predictedY, intensity);
+    p2.y += clamp((targetY - (p2.y + p2.h / 2)) * reaction, -maxStep, maxStep);
   } else {
-    const neutral = H / 2 - p2.h / 2;
-    p2.y += clamp((neutral - p2.y) * 0.06, -p2.speed * 0.6, p2.speed * 0.6);
+    const neutral = lerp(H / 2, game.puck.y, 0.25 + 0.35 * intensity) - p2.h / 2;
+    p2.y += clamp((neutral - p2.y) * 0.06, -maxStep * 0.6, maxStep * 0.6);
   }
 
   p2.y = clamp(p2.y, 0, H - p2.h);
@@ -391,10 +418,17 @@ function updatePaddleAI() {
   if (
     performance.now() >= p2.slapCooldownUntil &&
     game.puck.vx > 0 &&
-    game.puck.x > W * 0.65 &&
-    Math.abs(game.puck.y - (p2.y + p2.h / 2)) < p2.h * 0.22
+    game.puck.x > W * 0.62
   ) {
-    p2.slapReady = true;
+    const slapWindow = lerp(0.18, 0.3, intensity);
+    const fastPuck = Math.hypot(game.puck.vx, game.puck.vy) > lerp(7.5, 6.0, intensity);
+    if (
+      intensity > 0.45 &&
+      fastPuck &&
+      Math.abs(game.puck.y - (p2.y + p2.h / 2)) < p2.h * slapWindow
+    ) {
+      p2.slapReady = true;
+    }
   }
 }
 
