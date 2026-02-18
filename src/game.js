@@ -35,20 +35,57 @@ const DEFAULT_MUSIC_CONFIG = {
       id: "fallback",
       label: "Fallback",
       bpm: 168,
-      roots: [57, 60, 62, 65, 60, 62, 55, 58],
-      lead: [0, 7, 12, 7, 3, 10, 14, 10, 5, 12, 15, 12, 3, 10, 14, 7],
-      arp: [0, 3, 7, 12, 7, 3, 10, 14, 10, 7, 12, 15, 12, 7, 10, 14],
-      kick: [1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0],
-      hat: [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
-      bassOctave: -24,
-      leadWave: "square",
-      bassWave: "sawtooth",
-      arpWave: "triangle",
-      leadGain: 0.016,
-      bassGain: 0.02,
-      arpGain: 0.012,
-      hatGain: 0.014,
-      kickGain: 0.045
+      root: 57,
+      scale: [0, 2, 3, 5, 7, 8, 10],
+      progression: [0, 5, 3, 6, 0, 4, 5, 2],
+      sectionBars: 4,
+      sectionOrder: ["A", "A", "B", "A"],
+      variations: [0, 2, -1, 3],
+      variationEveryBars: 4,
+      sections: {
+        A: {
+          lead: [0, null, 2, null, 4, null, 5, null, 7, null, 5, null, 4, null, 2, null],
+          arp: [0, 2, 4, 7, 4, 2, 0, 2, 4, 7, 4, 2, 0, 2, 4, 5],
+          bass: [0, null, null, 0, 0, null, null, 0, 0, null, null, 0, 0, null, null, 0],
+          kick: [1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0],
+          hat: [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
+          snare: [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+          leadWave: "square",
+          bassWave: "sawtooth",
+          arpWave: "triangle",
+          leadGain: 0.016,
+          bassGain: 0.02,
+          arpGain: 0.012,
+          hatGain: 0.014,
+          snareGain: 0.02,
+          kickGain: 0.045,
+          leadOctave: 12,
+          arpOctave: 12,
+          bassOctave: -24,
+          swing: 0.08
+        },
+        B: {
+          lead: [0, 2, 4, 5, 7, 5, 4, 2, 0, 2, 5, 7, 5, 4, 2, 0],
+          arp: [0, 3, 5, 7, 5, 3, 2, 5, 0, 3, 5, 7, 8, 7, 5, 3],
+          bass: [0, 0, null, 0, 5, null, null, 5, 3, null, null, 3, 6, null, null, 6],
+          kick: [1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0],
+          hat: [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
+          snare: [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+          leadWave: "triangle",
+          bassWave: "square",
+          arpWave: "sawtooth",
+          leadGain: 0.018,
+          bassGain: 0.022,
+          arpGain: 0.014,
+          hatGain: 0.015,
+          snareGain: 0.022,
+          kickGain: 0.05,
+          leadOctave: 12,
+          arpOctave: 12,
+          bassOctave: -24,
+          swing: 0.04
+        }
+      }
     }
   ]
 };
@@ -261,9 +298,69 @@ function playHat(gain = 0.014, duration = 0.05) {
   }
 }
 
+function playSnare(gain = 0.02, duration = 0.12) {
+  if (!game.musicEnabled) return;
+  try {
+    const ctxAudio = getAudioCtx();
+    const source = ctxAudio.createBufferSource();
+    source.buffer = getNoiseBuffer(ctxAudio);
+    const filter = ctxAudio.createBiquadFilter();
+    filter.type = "bandpass";
+    filter.frequency.value = 1800;
+    filter.Q.value = 1.2;
+    const g = ctxAudio.createGain();
+    g.gain.setValueAtTime(gain, ctxAudio.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.0001, ctxAudio.currentTime + duration);
+    source.connect(filter);
+    filter.connect(g);
+    g.connect(ctxAudio.destination);
+    source.start();
+    source.stop(ctxAudio.currentTime + duration);
+  } catch {
+    // Ignore audio failures.
+  }
+}
+
 function patternHit(pattern, step) {
   if (!Array.isArray(pattern) || pattern.length === 0) return false;
   return Boolean(pattern[step % pattern.length]);
+}
+
+function readPatternValue(pattern, step) {
+  if (!Array.isArray(pattern) || pattern.length === 0) return null;
+  const value = pattern[step % pattern.length];
+  return value === undefined ? null : value;
+}
+
+function resolveSectionValue(section, song, key, fallback) {
+  if (section && section[key] !== undefined) return section[key];
+  if (song && song[key] !== undefined) return song[key];
+  return fallback;
+}
+
+function degreeToSemitone(scale, degree) {
+  if (!Array.isArray(scale) || scale.length === 0 || degree === null) return 0;
+  const len = scale.length;
+  const idx = ((degree % len) + len) % len;
+  const oct = Math.floor(degree / len);
+  return scale[idx] + oct * 12;
+}
+
+function getSongSection(song, bar) {
+  const order = Array.isArray(song.sectionOrder) ? song.sectionOrder : [];
+  const barsPerSection = Number(song.sectionBars) > 0 ? Number(song.sectionBars) : 4;
+  if (order.length === 0 || !song.sections) return song;
+  const idx = Math.floor(bar / barsPerSection) % order.length;
+  const key = order[idx];
+  return song.sections[key] || song;
+}
+
+function schedule(delayMs, fn) {
+  if (!delayMs) {
+    fn();
+    return;
+  }
+  window.setTimeout(fn, delayMs);
 }
 
 function getMusicStepMs(bpm) {
@@ -307,61 +404,108 @@ function tickMusic() {
   const step = game.musicStep;
   game.musicStep += 1;
   const gainBoost = getTempoGainBoost(game.tempo);
+  const bar = Math.floor(step / 16);
+  const stepInBar = step % 16;
+  const song = game.musicSong;
+  const section = getSongSection(song, bar);
+  const scale = song.scale || [0, 2, 3, 5, 7, 8, 10];
+  const progression = Array.isArray(song.progression) && song.progression.length
+    ? song.progression
+    : [0, 5, 3, 6];
+  const variationEvery = Number(song.variationEveryBars) > 0 ? Number(song.variationEveryBars) : 4;
+  const variations = Array.isArray(song.variations) && song.variations.length
+    ? song.variations
+    : [0];
+  const variationIndex = Math.floor(bar / variationEvery) % variations.length;
+  const variationDegree = variations[variationIndex] || 0;
+  const barDegree = progression[bar % progression.length] || 0;
+  const baseRoot = (song.root || 57)
+    + degreeToSemitone(scale, barDegree)
+    + degreeToSemitone(scale, variationDegree);
 
-  const roots = game.musicSong.roots || [];
-  const lead = game.musicSong.lead || [];
-  const arp = game.musicSong.arp || [];
-  const kickPattern = game.musicSong.kick || [];
-  const hatPattern = game.musicSong.hat || [];
-  const leadPattern = game.musicSong.leadPattern || null;
-  const bassPattern = game.musicSong.bass || null;
-  const root = roots.length ? roots[Math.floor(step / 4) % roots.length] : 57;
-  const leadOffset = lead.length ? lead[step % lead.length] : 0;
-  const arpOffset = arp.length ? arp[step % arp.length] : null;
-  const leadWave = game.musicSong.leadWave || "square";
-  const bassWave = game.musicSong.bassWave || "sawtooth";
-  const arpWave = game.musicSong.arpWave || "triangle";
-  const leadGain = (game.musicSong.leadGain ?? 0.016) * gainBoost;
-  const bassGain = (game.musicSong.bassGain ?? 0.02) * gainBoost;
-  const arpGain = (game.musicSong.arpGain ?? 0.012) * gainBoost;
-  const hatGain = (game.musicSong.hatGain ?? 0.014) * gainBoost;
-  const kickGain = (game.musicSong.kickGain ?? 0.045) * gainBoost;
-  const bassOctave = game.musicSong.bassOctave ?? -24;
-  const kickHit = patternHit(kickPattern, step);
-  const hatHit = patternHit(hatPattern, step);
-  const bassHit = bassPattern ? patternHit(bassPattern, step) : step % 4 === 0;
-  const leadHit = leadPattern ? patternHit(leadPattern, step) : true;
+  const leadPattern = resolveSectionValue(section, song, "lead", []);
+  const arpPattern = resolveSectionValue(section, song, "arp", []);
+  const counterPattern = resolveSectionValue(section, song, "counter", []);
+  const bassPattern = resolveSectionValue(section, song, "bass", []);
+  const kickPattern = resolveSectionValue(section, song, "kick", []);
+  const hatPattern = resolveSectionValue(section, song, "hat", []);
+  const snarePattern = resolveSectionValue(section, song, "snare", []);
+  const leadGate = resolveSectionValue(section, song, "leadGate", null);
+  const arpGate = resolveSectionValue(section, song, "arpGate", null);
+  const counterGate = resolveSectionValue(section, song, "counterGate", null);
+  const leadWave = resolveSectionValue(section, song, "leadWave", "square");
+  const bassWave = resolveSectionValue(section, song, "bassWave", "sawtooth");
+  const arpWave = resolveSectionValue(section, song, "arpWave", "triangle");
+  const counterWave = resolveSectionValue(section, song, "counterWave", "triangle");
+  const leadGain = (resolveSectionValue(section, song, "leadGain", 0.016)) * gainBoost;
+  const bassGain = (resolveSectionValue(section, song, "bassGain", 0.02)) * gainBoost;
+  const arpGain = (resolveSectionValue(section, song, "arpGain", 0.012)) * gainBoost;
+  const counterGain = (resolveSectionValue(section, song, "counterGain", 0.012)) * gainBoost;
+  const hatGain = (resolveSectionValue(section, song, "hatGain", 0.014)) * gainBoost;
+  const snareGain = (resolveSectionValue(section, song, "snareGain", 0.02)) * gainBoost;
+  const kickGain = (resolveSectionValue(section, song, "kickGain", 0.045)) * gainBoost;
+  const bassOctave = resolveSectionValue(section, song, "bassOctave", -24);
+  const leadOctave = resolveSectionValue(section, song, "leadOctave", 12);
+  const arpOctave = resolveSectionValue(section, song, "arpOctave", 12);
+  const counterOctave = resolveSectionValue(section, song, "counterOctave", 24);
+  const swing = resolveSectionValue(section, song, "swing", 0);
+  const delayMs = stepInBar % 2 === 1 ? game.musicStepMs * swing : 0;
+  const kickHit = patternHit(kickPattern, stepInBar);
+  const hatHit = patternHit(hatPattern, stepInBar);
+  const snareHit = patternHit(snarePattern, stepInBar);
+  const bassValue = readPatternValue(bassPattern, stepInBar);
+  const leadValue = readPatternValue(leadPattern, stepInBar);
+  const arpValue = readPatternValue(arpPattern, stepInBar);
+  const counterValue = readPatternValue(counterPattern, stepInBar);
   const duck = kickHit ? 0.72 : 1;
 
   if (kickHit) {
     playKick(kickGain);
   }
   if (hatHit) {
-    playHat(hatGain, 0.045);
+    schedule(delayMs, () => playHat(hatGain, 0.045));
   }
-  if (bassHit) {
-    playMusicTone(midiToFreq(root + bassOctave), 0.12, bassWave, bassGain * duck);
+  if (snareHit) {
+    schedule(delayMs, () => playSnare(snareGain, 0.12));
   }
-
-  if (leadHit) {
-    playMusicTone(
-      midiToFreq(root + leadOffset),
-      0.11,
-      leadWave,
-      leadGain * duck
-    );
+  if (bassValue !== null) {
+    const bassNote = baseRoot + degreeToSemitone(scale, bassValue) + bassOctave;
+    playMusicTone(midiToFreq(bassNote), 0.14, bassWave, bassGain * duck);
   }
 
-  if (arpOffset !== null) {
-    const arpGate = step % 2 === 0 || game.tempo > 40;
-    if (arpGate) {
-      playMusicTone(
-        midiToFreq(root + arpOffset + 12),
-        0.08,
-        arpWave,
-        arpGain * duck
-      );
+  if (leadValue !== null && (!leadGate || patternHit(leadGate, stepInBar))) {
+    const leadNote = baseRoot + degreeToSemitone(scale, leadValue) + leadOctave;
+    schedule(delayMs, () => {
+      playMusicTone(midiToFreq(leadNote), 0.11, leadWave, leadGain * duck);
+    });
+  }
+
+  if (arpValue !== null && (!arpGate || patternHit(arpGate, stepInBar))) {
+    const arpNote = baseRoot + degreeToSemitone(scale, arpValue) + arpOctave;
+    const gate = stepInBar % 2 === 0 || game.tempo > 40;
+    if (gate) {
+      schedule(delayMs, () => {
+        playMusicTone(midiToFreq(arpNote), 0.08, arpWave, arpGain * duck);
+      });
     }
+  }
+
+  if (counterValue !== null && (!counterGate || patternHit(counterGate, stepInBar))) {
+    const counterNote = baseRoot + degreeToSemitone(scale, counterValue) + counterOctave;
+    schedule(delayMs, () => {
+      playMusicTone(midiToFreq(counterNote), 0.1, counterWave, counterGain * duck);
+    });
+  }
+
+  if (stepInBar === 0 && resolveSectionValue(section, song, "pad", false)) {
+    const padChord = resolveSectionValue(section, song, "padChord", [0, 2, 4]);
+    const padGain = (resolveSectionValue(section, song, "padGain", 0.01)) * gainBoost;
+    const padWave = resolveSectionValue(section, song, "padWave", "triangle");
+    const padOctave = resolveSectionValue(section, song, "padOctave", 0);
+    padChord.forEach((degree) => {
+      const note = baseRoot + degreeToSemitone(scale, degree) + padOctave;
+      playMusicTone(midiToFreq(note), 0.4, padWave, padGain * duck);
+    });
   }
 }
 
