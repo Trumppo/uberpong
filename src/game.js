@@ -16,6 +16,8 @@ const enduranceValue = document.getElementById("enduranceValue");
 const bestValue = document.getElementById("bestValue");
 const aiState = document.getElementById("aiState");
 const sfxState = document.getElementById("sfxState");
+const songName = document.getElementById("songName");
+const nextTrackBtn = document.getElementById("nextTrackBtn");
 const uberFill = document.getElementById("uberFill");
 const mobileControls = document.getElementById("mobileControls");
 
@@ -24,12 +26,19 @@ const H = canvas.height;
 const keys = new Set();
 const GAME_VERSION = { major: 2, minor: 0 };
 const GAME_VERSION_LABEL = `v${GAME_VERSION.major}.${GAME_VERSION.minor}`;
-const MUSIC_BPM = 168;
-const MUSIC_STEP_MS = Math.round((60000 / MUSIC_BPM) / 4);
-const MUSIC_ROOTS = [57, 57, 60, 60, 62, 62, 55, 55];
-const MUSIC_LEAD = [0, 7, 12, 7, 2, 9, 14, 9, 4, 11, 16, 11, 2, 9, 14, 7];
 const FONT_DISPLAY = "'Orbitron', 'Segoe UI', sans-serif";
 const FONT_UI = "'Exo 2', 'Segoe UI', sans-serif";
+const DEFAULT_MUSIC_CONFIG = {
+  songs: [
+    {
+      id: "fallback",
+      label: "Fallback",
+      bpm: 168,
+      roots: [57, 57, 60, 60, 62, 62, 55, 55],
+      lead: [0, 7, 12, 7, 2, 9, 14, 9, 4, 11, 16, 11, 2, 9, 14, 7]
+    }
+  ]
+};
 
 const game = {
   config: null,
@@ -58,6 +67,9 @@ const game = {
   musicEnabled: true,
   musicStep: 0,
   musicTimer: null,
+  musicStepMs: 0,
+  musicConfig: null,
+  musicSong: null,
   audioCtx: null,
   shakePower: 0,
   flashAlpha: 0,
@@ -180,13 +192,52 @@ function playMusicTone(freq, duration = 0.1, type = "square", gain = 0.018) {
   }
 }
 
+function getMusicStepMs(bpm) {
+  const safeBpm = Number(bpm) > 0 ? Number(bpm) : 168;
+  return Math.round((60000 / safeBpm) / 4);
+}
+
+function pickRandomSong() {
+  const songs = game.musicConfig?.songs;
+  if (!Array.isArray(songs) || songs.length === 0) return null;
+  const idx = Math.floor(Math.random() * songs.length);
+  return songs[idx];
+}
+
+function setMusicSong(song) {
+  if (!song) return;
+  game.musicSong = song;
+  game.musicStep = 0;
+  game.musicStepMs = getMusicStepMs(song.bpm);
+  if (songName) {
+    songName.textContent = song.label || song.id || "-";
+  }
+  if (game.musicTimer !== null) {
+    window.clearInterval(game.musicTimer);
+    game.musicTimer = null;
+  }
+  if (game.started && game.musicEnabled) {
+    ensureMusicLoop();
+  }
+}
+
+function randomizeMusicSong() {
+  const song = pickRandomSong();
+  if (song) {
+    setMusicSong(song);
+  }
+}
+
 function tickMusic() {
+  if (!game.musicSong) return;
   const step = game.musicStep;
   game.musicStep += 1;
   const gainBoost = getTempoGainBoost(game.tempo);
 
-  const root = MUSIC_ROOTS[Math.floor(step / 4) % MUSIC_ROOTS.length];
-  const leadOffset = MUSIC_LEAD[step % MUSIC_LEAD.length];
+  const roots = game.musicSong.roots || [];
+  const lead = game.musicSong.lead || [];
+  const root = roots.length ? roots[Math.floor(step / 4) % roots.length] : 57;
+  const leadOffset = lead.length ? lead[step % lead.length] : 0;
 
   if (step % 2 === 0) {
     playMusicTone(midiToFreq(root - 12), 0.16, "square", 0.02 * gainBoost);
@@ -205,11 +256,13 @@ function tickMusic() {
 }
 
 function ensureMusicLoop() {
+  if (!game.musicSong) return;
   if (game.musicTimer !== null) return;
+  const interval = game.musicStepMs || getMusicStepMs(game.musicSong?.bpm);
   game.musicTimer = window.setInterval(() => {
     if (!game.started || game.ended || !game.musicEnabled) return;
     tickMusic();
-  }, MUSIC_STEP_MS);
+  }, interval);
 }
 
 function createPaddles() {
@@ -275,7 +328,7 @@ function resetRally(servingPlayer = 0) {
 }
 
 function applyMode(modeKey, options = {}) {
-  const { start = false } = options;
+  const { start = false, randomizeSong = false } = options;
   game.modeKey = modeKey;
   game.mode = game.config.modes[modeKey];
   game.scores = [0, 0];
@@ -288,6 +341,9 @@ function applyMode(modeKey, options = {}) {
   game.particles = [];
   game.paddles = createPaddles();
   resetRally(0);
+  if (randomizeSong) {
+    randomizeMusicSong();
+  }
   if (!start) {
     game.puck.vx = 0;
     game.puck.vy = 0;
@@ -1068,7 +1124,7 @@ function setupInputs() {
 
   startBtn.addEventListener("click", () => {
     resumeAudioContext();
-    applyMode(modeSelect.value, { start: true });
+    applyMode(modeSelect.value, { start: true, randomizeSong: true });
     ensureMusicLoop();
   });
 
@@ -1086,12 +1142,27 @@ function setupInputs() {
     game.sfxEnabled = !game.sfxEnabled;
   });
 
+  nextTrackBtn.addEventListener("click", () => {
+    randomizeMusicSong();
+  });
+
   mobileControls.querySelectorAll("button[data-hold]").forEach(bindHoldButton);
 }
 
 async function init() {
-  const response = await fetch("./config/courts.json");
-  game.config = await response.json();
+  const [courtsResponse, musicResponse] = await Promise.all([
+    fetch("./config/courts.json"),
+    fetch("./config/music.json")
+  ]);
+  game.config = await courtsResponse.json();
+  try {
+    game.musicConfig = await musicResponse.json();
+  } catch {
+    game.musicConfig = DEFAULT_MUSIC_CONFIG;
+  }
+  if (!game.musicConfig || !Array.isArray(game.musicConfig.songs)) {
+    game.musicConfig = DEFAULT_MUSIC_CONFIG;
+  }
 
   const modeKeys = Object.keys(game.config.modes);
   modeKeys.forEach((key) => {
@@ -1104,6 +1175,7 @@ async function init() {
   modeSelect.value = "casual";
   opponentSelect.value = "human";
   game.opponent = opponentSelect.value;
+  randomizeMusicSong();
   applyMode("casual", { start: false });
   setupInputs();
   loop();

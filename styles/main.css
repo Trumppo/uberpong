@@ -107,6 +107,39 @@ button:hover { filter: brightness(1.08) saturate(1.1); }
   letter-spacing: 0.04em;
 }
 
+.music-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.music-track {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  background: rgba(11, 10, 26, 0.72);
+  border: 1px solid rgba(133, 161, 255, 0.35);
+  border-radius: 10px;
+  padding: 9px 10px;
+}
+
+#songName {
+  color: var(--accent-2);
+  font-weight: 700;
+  text-shadow: 0 0 12px rgba(255, 217, 61, 0.4);
+  font-family: var(--font-display);
+  letter-spacing: 0.04em;
+}
+
+#nextTrackBtn {
+  padding: 10px 14px;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
 .uber-meter {
   display: grid;
   gap: 8px;
