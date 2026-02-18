@@ -28,14 +28,27 @@ const GAME_VERSION = { major: 2, minor: 0 };
 const GAME_VERSION_LABEL = `v${GAME_VERSION.major}.${GAME_VERSION.minor}`;
 const FONT_DISPLAY = "'Orbitron', 'Segoe UI', sans-serif";
 const FONT_UI = "'Exo 2', 'Segoe UI', sans-serif";
+let musicNoiseBuffer = null;
 const DEFAULT_MUSIC_CONFIG = {
   songs: [
     {
       id: "fallback",
       label: "Fallback",
       bpm: 168,
-      roots: [57, 57, 60, 60, 62, 62, 55, 55],
-      lead: [0, 7, 12, 7, 2, 9, 14, 9, 4, 11, 16, 11, 2, 9, 14, 7]
+      roots: [57, 60, 62, 65, 60, 62, 55, 58],
+      lead: [0, 7, 12, 7, 3, 10, 14, 10, 5, 12, 15, 12, 3, 10, 14, 7],
+      arp: [0, 3, 7, 12, 7, 3, 10, 14, 10, 7, 12, 15, 12, 7, 10, 14],
+      kick: [1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0],
+      hat: [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
+      bassOctave: -24,
+      leadWave: "square",
+      bassWave: "sawtooth",
+      arpWave: "triangle",
+      leadGain: 0.016,
+      bassGain: 0.02,
+      arpGain: 0.012,
+      hatGain: 0.014,
+      kickGain: 0.045
     }
   ]
 };
@@ -192,6 +205,67 @@ function playMusicTone(freq, duration = 0.1, type = "square", gain = 0.018) {
   }
 }
 
+function getNoiseBuffer(ctxAudio) {
+  if (musicNoiseBuffer && musicNoiseBuffer.sampleRate === ctxAudio.sampleRate) {
+    return musicNoiseBuffer;
+  }
+  const length = Math.floor(ctxAudio.sampleRate * 0.08);
+  const buffer = ctxAudio.createBuffer(1, length, ctxAudio.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < length; i += 1) {
+    data[i] = (Math.random() * 2 - 1) * 0.6;
+  }
+  musicNoiseBuffer = buffer;
+  return buffer;
+}
+
+function playKick(gain = 0.045) {
+  if (!game.musicEnabled) return;
+  try {
+    const ctxAudio = getAudioCtx();
+    const o = ctxAudio.createOscillator();
+    const g = ctxAudio.createGain();
+    o.type = "sine";
+    o.frequency.setValueAtTime(150, ctxAudio.currentTime);
+    o.frequency.exponentialRampToValueAtTime(55, ctxAudio.currentTime + 0.08);
+    g.gain.setValueAtTime(gain, ctxAudio.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.0001, ctxAudio.currentTime + 0.1);
+    o.connect(g);
+    g.connect(ctxAudio.destination);
+    o.start();
+    o.stop(ctxAudio.currentTime + 0.12);
+  } catch {
+    // Ignore audio failures.
+  }
+}
+
+function playHat(gain = 0.014, duration = 0.05) {
+  if (!game.musicEnabled) return;
+  try {
+    const ctxAudio = getAudioCtx();
+    const source = ctxAudio.createBufferSource();
+    source.buffer = getNoiseBuffer(ctxAudio);
+    const filter = ctxAudio.createBiquadFilter();
+    filter.type = "highpass";
+    filter.frequency.value = 5200;
+    const g = ctxAudio.createGain();
+    g.gain.setValueAtTime(gain, ctxAudio.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.0001, ctxAudio.currentTime + duration);
+    source.connect(filter);
+    filter.connect(g);
+    g.connect(ctxAudio.destination);
+    source.start();
+    source.stop(ctxAudio.currentTime + duration);
+  } catch {
+    // Ignore audio failures.
+  }
+}
+
+function patternHit(pattern, step) {
+  if (!Array.isArray(pattern) || pattern.length === 0) return false;
+  return Boolean(pattern[step % pattern.length]);
+}
+
 function getMusicStepMs(bpm) {
   const safeBpm = Number(bpm) > 0 ? Number(bpm) : 168;
   return Math.round((60000 / safeBpm) / 4);
@@ -236,22 +310,58 @@ function tickMusic() {
 
   const roots = game.musicSong.roots || [];
   const lead = game.musicSong.lead || [];
+  const arp = game.musicSong.arp || [];
+  const kickPattern = game.musicSong.kick || [];
+  const hatPattern = game.musicSong.hat || [];
+  const leadPattern = game.musicSong.leadPattern || null;
+  const bassPattern = game.musicSong.bass || null;
   const root = roots.length ? roots[Math.floor(step / 4) % roots.length] : 57;
   const leadOffset = lead.length ? lead[step % lead.length] : 0;
+  const arpOffset = arp.length ? arp[step % arp.length] : null;
+  const leadWave = game.musicSong.leadWave || "square";
+  const bassWave = game.musicSong.bassWave || "sawtooth";
+  const arpWave = game.musicSong.arpWave || "triangle";
+  const leadGain = (game.musicSong.leadGain ?? 0.016) * gainBoost;
+  const bassGain = (game.musicSong.bassGain ?? 0.02) * gainBoost;
+  const arpGain = (game.musicSong.arpGain ?? 0.012) * gainBoost;
+  const hatGain = (game.musicSong.hatGain ?? 0.014) * gainBoost;
+  const kickGain = (game.musicSong.kickGain ?? 0.045) * gainBoost;
+  const bassOctave = game.musicSong.bassOctave ?? -24;
+  const kickHit = patternHit(kickPattern, step);
+  const hatHit = patternHit(hatPattern, step);
+  const bassHit = bassPattern ? patternHit(bassPattern, step) : step % 4 === 0;
+  const leadHit = leadPattern ? patternHit(leadPattern, step) : true;
+  const duck = kickHit ? 0.72 : 1;
 
-  if (step % 2 === 0) {
-    playMusicTone(midiToFreq(root - 12), 0.16, "square", 0.02 * gainBoost);
+  if (kickHit) {
+    playKick(kickGain);
+  }
+  if (hatHit) {
+    playHat(hatGain, 0.045);
+  }
+  if (bassHit) {
+    playMusicTone(midiToFreq(root + bassOctave), 0.12, bassWave, bassGain * duck);
   }
 
-  playMusicTone(
-    midiToFreq(root + leadOffset),
-    0.11,
-    step % 4 === 0 ? "triangle" : "square",
-    0.016 * gainBoost
-  );
+  if (leadHit) {
+    playMusicTone(
+      midiToFreq(root + leadOffset),
+      0.11,
+      leadWave,
+      leadGain * duck
+    );
+  }
 
-  if (step % 8 === 4) {
-    playMusicTone(midiToFreq(root + 12), 0.08, "sawtooth", 0.01 * gainBoost);
+  if (arpOffset !== null) {
+    const arpGate = step % 2 === 0 || game.tempo > 40;
+    if (arpGate) {
+      playMusicTone(
+        midiToFreq(root + arpOffset + 12),
+        0.08,
+        arpWave,
+        arpGain * duck
+      );
+    }
   }
 }
 
