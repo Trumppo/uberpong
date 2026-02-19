@@ -42,6 +42,15 @@ const DEFAULT_MUSIC_CONFIG = {
       sectionOrder: ["A", "A", "B", "A"],
       variations: [0, 2, -1, 3],
       variationEveryBars: 4,
+      padAlwaysOn: true,
+      padFlavor: "triad",
+      padFloatChance: 0.2,
+      padFloatShift: ["sus2", "sus4", "add9"],
+      padAttackMs: 120,
+      padReleaseMs: 320,
+      padDetune: 8,
+      padCutoff: 2600,
+      padGain: 0.012,
       sections: {
         A: {
           lead: [0, null, 2, null, 4, null, 5, null, 7, null, 5, null, 4, null, 2, null],
@@ -62,7 +71,10 @@ const DEFAULT_MUSIC_CONFIG = {
           leadOctave: 12,
           arpOctave: 12,
           bassOctave: -24,
-          swing: 0.08
+          swing: 0.08,
+          pad: true,
+          padChord: [0, 2, 4],
+          padFlavor: "triad"
         },
         B: {
           lead: [0, 2, 4, 5, 7, 5, 4, 2, 0, 2, 5, 7, 5, 4, 2, 0],
@@ -83,7 +95,10 @@ const DEFAULT_MUSIC_CONFIG = {
           leadOctave: 12,
           arpOctave: 12,
           bassOctave: -24,
-          swing: 0.04
+          swing: 0.04,
+          pad: true,
+          padChord: [0, 2, 4],
+          padFlavor: "triad"
         }
       }
     }
@@ -121,6 +136,8 @@ const game = {
   musicConfig: null,
   musicSong: null,
   audioCtx: null,
+  padVoices: [],
+  padChordKey: null,
   shakePower: 0,
   flashAlpha: 0,
   hitFreezeFrames: 0,
@@ -363,6 +380,136 @@ function schedule(delayMs, fn) {
   window.setTimeout(fn, delayMs);
 }
 
+function uniqueDegrees(degrees) {
+  const seen = new Set();
+  const out = [];
+  degrees.forEach((deg) => {
+    if (deg === null) return;
+    const key = String(deg);
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(deg);
+  });
+  return out;
+}
+
+function buildPadChordDegrees(flavor) {
+  if (flavor === "7th9th") {
+    return [0, 2, 4, 6, 8];
+  }
+  return [0, 2, 4];
+}
+
+function applyFloatChord(chord, floatShift) {
+  if (!floatShift) return chord;
+  const out = [...chord];
+  if (floatShift === "sus2") {
+    return out.map((deg, idx) => (idx === 1 ? deg - 1 : deg));
+  }
+  if (floatShift === "sus4") {
+    return out.map((deg, idx) => (idx === 1 ? deg + 1 : deg));
+  }
+  if (floatShift === "add9") {
+    out.push(8);
+    return out;
+  }
+  return chord;
+}
+
+function stopPadVoices(releaseMs) {
+  const now = getAudioCtx().currentTime;
+  const release = Math.max(0.05, releaseMs / 1000);
+  game.padVoices.forEach((voice) => {
+    try {
+      voice.gain.gain.cancelScheduledValues(now);
+      voice.gain.gain.setValueAtTime(voice.gain.gain.value, now);
+      voice.gain.gain.linearRampToValueAtTime(0.0001, now + release);
+      voice.oscillators.forEach((osc) => {
+        osc.stop(now + release + 0.02);
+      });
+      if (voice.lfo) {
+        voice.lfo.stop(now + release + 0.02);
+      }
+    } catch {
+      // Ignore audio failures.
+    }
+  });
+  game.padVoices = [];
+}
+
+function playPadChord(options) {
+  const {
+    notes,
+    gain,
+    attackMs,
+    releaseMs,
+    detune,
+    cutoff,
+    wave
+  } = options;
+  if (!notes || notes.length === 0) return;
+  const ctxAudio = getAudioCtx();
+  stopPadVoices(releaseMs);
+
+  const filter = ctxAudio.createBiquadFilter();
+  filter.type = "lowpass";
+  filter.frequency.value = cutoff;
+
+  const lfo = ctxAudio.createOscillator();
+  const lfoGain = ctxAudio.createGain();
+  lfo.type = "sine";
+  lfo.frequency.value = 0.15;
+  lfoGain.gain.value = cutoff * 0.12;
+  lfo.connect(lfoGain);
+  lfoGain.connect(filter.frequency);
+
+  const gainNode = ctxAudio.createGain();
+  const now = ctxAudio.currentTime;
+  const attack = Math.max(0.02, attackMs / 1000);
+  gainNode.gain.setValueAtTime(0.0001, now);
+  gainNode.gain.linearRampToValueAtTime(gain, now + attack);
+
+  const oscillators = [];
+  const detunes = [-detune, 0, detune];
+  detunes.forEach((detuneValue) => {
+    notes.forEach((freq) => {
+      const osc = ctxAudio.createOscillator();
+      osc.type = wave;
+      osc.frequency.value = freq;
+      osc.detune.value = detuneValue;
+      osc.connect(filter);
+      oscillators.push(osc);
+    });
+  });
+
+  filter.connect(gainNode);
+  gainNode.connect(ctxAudio.destination);
+  oscillators.forEach((osc) => osc.start());
+  lfo.start();
+
+  game.padVoices.push({
+    oscillators,
+    gain: gainNode,
+    lfo
+  });
+}
+
+function duckPad(gainFactor) {
+  const ctxAudio = getAudioCtx();
+  const now = ctxAudio.currentTime;
+  game.padVoices.forEach((voice) => {
+    try {
+      const current = voice.gain.gain.value;
+      voice.gain.gain.cancelScheduledValues(now);
+      voice.gain.gain.setValueAtTime(current, now);
+      voice.gain.gain.linearRampToValueAtTime(current * gainFactor, now + 0.04);
+      voice.gain.gain.linearRampToValueAtTime(current, now + 0.12);
+    } catch {
+      // Ignore audio failures.
+    }
+  });
+}
+
 function getMusicStepMs(bpm) {
   const safeBpm = Number(bpm) > 0 ? Number(bpm) : 168;
   return Math.round((60000 / safeBpm) / 4);
@@ -459,8 +606,56 @@ function tickMusic() {
   const counterValue = readPatternValue(counterPattern, stepInBar);
   const duck = kickHit ? 0.72 : 1;
 
+  const padAlwaysOn = resolveSectionValue(section, song, "padAlwaysOn", song.padAlwaysOn);
+  const padEnabled = resolveSectionValue(section, song, "pad", padAlwaysOn);
+  if (padEnabled && stepInBar === 0) {
+    const padFlavor = resolveSectionValue(section, song, "padFlavor", song.padFlavor || "triad");
+    const padChordBase = resolveSectionValue(section, song, "padChord", buildPadChordDegrees(padFlavor));
+    const padFloatChance = resolveSectionValue(section, song, "padFloatChance", song.padFloatChance || 0);
+    const padFloatShift = resolveSectionValue(section, song, "padFloatShift", song.padFloatShift || []);
+    const floatPick = Array.isArray(padFloatShift) && padFloatShift.length
+      ? padFloatShift[Math.floor(Math.random() * padFloatShift.length)]
+      : null;
+    const shouldFloat = Math.random() < padFloatChance;
+    const chordDegrees = uniqueDegrees(
+      applyFloatChord(padChordBase, shouldFloat ? floatPick : null)
+    );
+    const padDetune = resolveSectionValue(section, song, "padDetune", 8);
+    const padCutoff = resolveSectionValue(section, song, "padCutoff", 2600);
+    const padGain = (resolveSectionValue(section, song, "padGain", 0.01)) * gainBoost;
+    const padAttackMs = resolveSectionValue(section, song, "padAttackMs", 100);
+    const padReleaseMs = resolveSectionValue(section, song, "padReleaseMs", 320);
+    const padWave = resolveSectionValue(section, song, "padWave", "sawtooth");
+    const padOctave = resolveSectionValue(section, song, "padOctave", 0);
+    const padKey = JSON.stringify({
+      bar,
+      chordDegrees,
+      padFlavor,
+      padOctave
+    });
+    if (game.padChordKey !== padKey) {
+      game.padChordKey = padKey;
+      const notes = chordDegrees.map((deg) => {
+        const note = baseRoot + degreeToSemitone(scale, deg) + padOctave;
+        return midiToFreq(note);
+      });
+      playPadChord({
+        notes,
+        gain: padGain,
+        attackMs: padAttackMs,
+        releaseMs: padReleaseMs,
+        detune: padDetune,
+        cutoff: padCutoff,
+        wave: padWave
+      });
+    }
+  }
+
   if (kickHit) {
     playKick(kickGain);
+    if (padEnabled) {
+      duckPad(0.85);
+    }
   }
   if (hatHit) {
     schedule(delayMs, () => playHat(hatGain, 0.045));
