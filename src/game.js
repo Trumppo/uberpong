@@ -90,6 +90,29 @@ const DEFAULT_MUSIC_CONFIG = {
   ]
 };
 
+const POWERUP_DEFS = {
+  turbo: {
+    label: "Turbo Puck",
+    color: "#ff5fd7",
+    durationMs: 5200
+  },
+  paddle: {
+    label: "Paddle Surge",
+    color: "#5be0ff",
+    durationMs: 6800
+  },
+  magnet: {
+    label: "Magnet Field",
+    color: "#ffe14f",
+    durationMs: 5400
+  },
+  shield: {
+    label: "Shield Pulse",
+    color: "#62ff8a",
+    durationMs: 9000
+  }
+};
+
 const game = {
   config: null,
   modeKey: "casual",
@@ -121,6 +144,28 @@ const game = {
   musicConfig: null,
   musicSong: null,
   audioCtx: null,
+  powerups: [],
+  powerupState: {
+    nextId: 1,
+    lastSpawnCheck: 0,
+    spawnCooldownUntil: 0,
+    active: [
+      {
+        paddleBoostUntil: 0,
+        puckBoostUntil: 0,
+        magnetUntil: 0,
+        shieldUntil: 0,
+        shieldReady: false
+      },
+      {
+        paddleBoostUntil: 0,
+        puckBoostUntil: 0,
+        magnetUntil: 0,
+        shieldUntil: 0,
+        shieldReady: false
+      }
+    ]
+  },
   shakePower: 0,
   flashAlpha: 0,
   hitFreezeFrames: 0,
@@ -526,6 +571,7 @@ function createPaddles() {
       y: H / 2 - 55,
       w: 14,
       h: 110,
+      baseH: 110,
       speed: 7,
       upKey: "KeyW",
       downKey: "KeyS",
@@ -539,6 +585,7 @@ function createPaddles() {
       y: H / 2 - 55,
       w: 14,
       h: 110,
+      baseH: 110,
       speed: 7,
       upKey: "ArrowUp",
       downKey: "ArrowDown",
@@ -569,6 +616,7 @@ function resetRally(servingPlayer = 0) {
   game.comboTier = 0;
   game.tempo = 0;
   game.riskZoneActive = false;
+  game.powerups = [];
   game.rallyStart = performance.now();
   game.lastHitBy = servingPlayer;
   game.puck = createPuck(servingPlayer);
@@ -593,6 +641,7 @@ function applyMode(modeKey, options = {}) {
   game.musicStep = 0;
   game.started = start;
   game.particles = [];
+  resetPowerups();
   game.paddles = createPaddles();
   resetRally(0);
   if (randomizeSong) {
@@ -627,6 +676,12 @@ function reflectFromPaddle(paddle, playerIndex) {
     addShake(2.8 + (game.tempo / 100) * 2.2);
     addFlash(0.35 + (game.tempo / 100) * 0.2);
     game.hitFreezeFrames = Math.max(game.hitFreezeFrames, 2);
+  }
+
+  const now = performance.now();
+  if (isPowerupActive(playerIndex, "puckBoostUntil", now)) {
+    nextSpeed = clamp(nextSpeed * 1.18, game.mode.basePuckSpeed, game.mode.maxPuckSpeed * 1.4);
+    spawnParticles(game.puck.x, game.puck.y, "#ff5fd7", 10, 3.2);
   }
 
   const dir = playerIndex === 0 ? 1 : -1;
@@ -836,6 +891,36 @@ function drawPuckTrail() {
   }
 }
 
+function drawPowerups() {
+  if (game.powerups.length === 0) return;
+  const now = performance.now() * 0.001;
+  for (const powerup of game.powerups) {
+    const pulse = 0.35 + Math.sin(now * 3.4 + powerup.id) * 0.25;
+    const outer = powerup.r * (2.2 + pulse * 0.6);
+    const glow = ctx.createRadialGradient(powerup.x, powerup.y, powerup.r * 0.4, powerup.x, powerup.y, outer);
+    glow.addColorStop(0, `${powerup.color}cc`);
+    glow.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(powerup.x, powerup.y, outer, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    ctx.strokeStyle = `${powerup.color}cc`;
+    ctx.lineWidth = 2 + pulse * 1.6;
+    ctx.beginPath();
+    ctx.arc(powerup.x, powerup.y, powerup.r + pulse * 4, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.fillStyle = powerup.color;
+    ctx.beginPath();
+    ctx.arc(powerup.x, powerup.y, powerup.r * (0.85 + pulse * 0.1), 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
 function onComboTierUp(tier, x, y) {
   const colors = ["#30d9ff", "#8d66ff", "#ff4fd8", "#ffe14f"];
   const color = colors[Math.max(0, tier - 1) % colors.length];
@@ -857,6 +942,186 @@ function addImpactRing(x, y, color) {
       width: 2 + idx
     });
   });
+}
+
+function resetPowerups() {
+  game.powerups = [];
+  game.powerupState.lastSpawnCheck = 0;
+  game.powerupState.spawnCooldownUntil = 0;
+  game.powerupState.active.forEach((state) => {
+    state.paddleBoostUntil = 0;
+    state.puckBoostUntil = 0;
+    state.magnetUntil = 0;
+    state.shieldUntil = 0;
+    state.shieldReady = false;
+  });
+}
+
+function isPowerupActive(playerIndex, key, now) {
+  const state = game.powerupState.active[playerIndex];
+  return Boolean(state && now < state[key]);
+}
+
+function updatePaddleSizes(now) {
+  game.paddles.forEach((p, idx) => {
+    const boosted = isPowerupActive(idx, "paddleBoostUntil", now);
+    const target = boosted ? p.baseH * 1.28 : p.baseH;
+    if (p.h === target) return;
+    const center = p.y + p.h / 2;
+    p.h = clamp(target, p.baseH, p.baseH * 1.35);
+    p.y = clamp(center - p.h / 2, 0, H - p.h);
+  });
+}
+
+function pickPowerupType() {
+  const types = ["turbo", "paddle", "magnet", "shield"];
+  const weights = [0.32, 0.28, 0.24, 0.16];
+  const roll = Math.random();
+  let acc = 0;
+  for (let i = 0; i < types.length; i += 1) {
+    acc += weights[i];
+    if (roll <= acc) return types[i];
+  }
+  return types[0];
+}
+
+function isPowerupPositionSafe(x, y) {
+  const margin = 70;
+  for (const p of game.paddles) {
+    if (
+      x > p.x - margin &&
+      x < p.x + p.w + margin &&
+      y > p.y - margin &&
+      y < p.y + p.h + margin
+    ) {
+      return false;
+    }
+  }
+  for (const zone of game.config.riskZones) {
+    const pad = 18;
+    if (
+      x > zone.x - pad &&
+      x < zone.x + zone.w + pad &&
+      y > zone.y - pad &&
+      y < zone.y + zone.h + pad
+    ) {
+      return false;
+    }
+  }
+  const dx = x - game.puck.x;
+  const dy = y - game.puck.y;
+  if (Math.hypot(dx, dy) < 120) return false;
+  return true;
+}
+
+function spawnPowerup(now) {
+  const type = pickPowerupType();
+  const def = POWERUP_DEFS[type];
+  if (!def) return;
+  let spot = null;
+  for (let i = 0; i < 12; i += 1) {
+    const x = lerp(W * 0.22, W * 0.78, Math.random());
+    const y = lerp(50, H - 50, Math.random());
+    if (isPowerupPositionSafe(x, y)) {
+      spot = { x, y };
+      break;
+    }
+  }
+  if (!spot) return;
+  const lifespanMs = 5000 + Math.random() * 5000;
+  game.powerups.push({
+    id: game.powerupState.nextId++,
+    type,
+    x: spot.x,
+    y: spot.y,
+    r: 15,
+    color: def.color,
+    spawnedAt: now,
+    lifespanMs
+  });
+  spawnParticles(spot.x, spot.y, def.color, 10, 2.6);
+}
+
+function maybeSpawnPowerup(now) {
+  if (game.powerups.length >= 1) return;
+  if (now < game.powerupState.spawnCooldownUntil) return;
+  if (now - game.powerupState.lastSpawnCheck < 900) return;
+  game.powerupState.lastSpawnCheck = now;
+  const tempoT = clamp(game.tempo / 100, 0, 1);
+  if (tempoT < 0.55) return;
+  const chance = 0.04 + tempoT * 0.12;
+  if (Math.random() <= chance) {
+    spawnPowerup(now);
+    game.powerupState.spawnCooldownUntil = now + 2600;
+  }
+}
+
+function updatePowerups(now) {
+  game.powerups = game.powerups.filter((powerup) => (now - powerup.spawnedAt) <= powerup.lifespanMs);
+}
+
+function applyPowerupEffect(type, playerIndex, now) {
+  const state = game.powerupState.active[playerIndex];
+  const def = POWERUP_DEFS[type];
+  if (!state || !def) return;
+  const until = now + def.durationMs;
+  if (type === "turbo") {
+    state.puckBoostUntil = Math.max(state.puckBoostUntil, until);
+  }
+  if (type === "paddle") {
+    state.paddleBoostUntil = Math.max(state.paddleBoostUntil, until);
+  }
+  if (type === "magnet") {
+    state.magnetUntil = Math.max(state.magnetUntil, until);
+  }
+  if (type === "shield") {
+    state.shieldUntil = Math.max(state.shieldUntil, until);
+    state.shieldReady = true;
+  }
+}
+
+function collectPowerup(powerup) {
+  const owner = game.lastHitBy ?? 0;
+  const def = POWERUP_DEFS[powerup.type];
+  if (!def) return;
+  applyPowerupEffect(powerup.type, owner, performance.now());
+  spawnParticles(powerup.x, powerup.y, def.color, 28, 4.2);
+  spawnParticles(powerup.x, powerup.y, "#ffffff", 12, 5.2);
+  addImpactRing(powerup.x, powerup.y, def.color);
+  addFlash(0.32);
+  addShake(2.4);
+  playTone(520, 0.07, "triangle", 0.08);
+}
+
+function checkPowerupHits() {
+  if (game.powerups.length === 0) return;
+  const remaining = [];
+  for (const powerup of game.powerups) {
+    const dx = powerup.x - game.puck.x;
+    const dy = powerup.y - game.puck.y;
+    const hit = Math.hypot(dx, dy) <= (powerup.r + game.puck.r + 2);
+    if (hit) {
+      collectPowerup(powerup);
+      continue;
+    }
+    remaining.push(powerup);
+  }
+  game.powerups = remaining;
+}
+
+function applyMagnetInfluence(now) {
+  const strength = 0.028 + (game.tempo / 100) * 0.04;
+  const maxPull = 0.35;
+  if (isPowerupActive(0, "magnetUntil", now) && game.puck.vx < 0) {
+    const p1 = game.paddles[0];
+    const dy = (p1.y + p1.h / 2) - game.puck.y;
+    game.puck.vy += clamp((dy / H) * strength * game.mode.maxPuckSpeed, -maxPull, maxPull);
+  }
+  if (isPowerupActive(1, "magnetUntil", now) && game.puck.vx > 0) {
+    const p2 = game.paddles[1];
+    const dy = (p2.y + p2.h / 2) - game.puck.y;
+    game.puck.vy += clamp((dy / H) * strength * game.mode.maxPuckSpeed, -maxPull, maxPull);
+  }
 }
 
 function updateImpactRings() {
@@ -918,6 +1183,8 @@ function updatePuck() {
     playTone(320, 0.02, "triangle", 0.02);
   }
 
+  applyMagnetInfluence(performance.now());
+
   const p1 = game.paddles[0];
   const p2 = game.paddles[1];
 
@@ -950,6 +1217,22 @@ function updatePuck() {
 }
 
 function onGoal(scorer) {
+  const now = performance.now();
+  const defender = scorer === 0 ? 1 : 0;
+  const shieldState = game.powerupState.active[defender];
+  if (shieldState?.shieldReady && now < shieldState.shieldUntil) {
+    shieldState.shieldReady = false;
+    shieldState.shieldUntil = 0;
+    spawnParticles(game.puck.x, game.puck.y, "#62ff8a", 36, 4.8);
+    spawnParticles(game.puck.x, game.puck.y, "#ffffff", 16, 5.4);
+    addImpactRing(game.puck.x, game.puck.y, "#62ff8a");
+    addFlash(0.3);
+    addShake(2.6);
+    playTone(680, 0.08, "triangle", 0.07);
+    resetRally(defender);
+    return;
+  }
+
   spawnParticles(game.puck.x, game.puck.y, scorer === 0 ? "#5be0ff" : "#ff6e9c", 26, 4.4);
   playTone(scorer === 0 ? 220 : 180, 0.13, "square", 0.06);
   addShake(3.5);
@@ -1019,11 +1302,16 @@ function update() {
   }
 
   if (game.started && !game.ended) {
+    const now = performance.now();
+    updatePaddleSizes(now);
+    updatePowerups(now);
     updatePaddlesHuman();
     updatePaddleAI();
     updateTempo();
     updatePuck();
     checkRiskZones();
+    checkPowerupHits();
+    maybeSpawnPowerup(now);
     updatePuckTrail();
     updateImpactRings();
 
@@ -1158,6 +1446,7 @@ function drawCourt() {
 }
 
 function drawObjects() {
+  const now = performance.now();
   game.paddles.forEach((p) => {
     ctx.save();
     ctx.shadowColor = p.color;
@@ -1177,8 +1466,23 @@ function drawObjects() {
     }
   });
 
+  game.paddles.forEach((p, idx) => {
+    if (!isPowerupActive(idx, "shieldUntil", now)) return;
+    const ring = ctx.createRadialGradient(p.x + p.w / 2, p.y + p.h / 2, 6, p.x + p.w / 2, p.y + p.h / 2, p.h * 0.9);
+    ring.addColorStop(0, "rgba(98, 255, 138, 0.35)");
+    ring.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.fillStyle = ring;
+    ctx.beginPath();
+    ctx.arc(p.x + p.w / 2, p.y + p.h / 2, p.h * 0.9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  });
+
   drawImpactRings();
   drawPuckTrail();
+  drawPowerups();
   const glow = ctx.createRadialGradient(
     game.puck.x,
     game.puck.y,
