@@ -134,6 +134,7 @@ const game = {
   lastHitBy: 0,
   ended: false,
   started: false,
+  paused: false,
   riskZoneActive: false,
   victoryExplosionDone: false,
   sfxEnabled: true,
@@ -640,6 +641,7 @@ function applyMode(modeKey, options = {}) {
   game.victoryExplosionDone = false;
   game.musicStep = 0;
   game.started = start;
+  game.paused = false;
   game.particles = [];
   resetPowerups();
   game.paddles = createPaddles();
@@ -895,8 +897,8 @@ function drawPowerups() {
   if (game.powerups.length === 0) return;
   const now = performance.now() * 0.001;
   for (const powerup of game.powerups) {
-    const pulse = 0.35 + Math.sin(now * 3.4 + powerup.id) * 0.25;
-    const outer = powerup.r * (2.2 + pulse * 0.6);
+    const pulse = 0.45 + Math.sin(now * 3.4 + powerup.id) * 0.3;
+    const outer = powerup.r * (2.6 + pulse * 0.7);
     const glow = ctx.createRadialGradient(powerup.x, powerup.y, powerup.r * 0.4, powerup.x, powerup.y, outer);
     glow.addColorStop(0, `${powerup.color}cc`);
     glow.addColorStop(1, "rgba(0,0,0,0)");
@@ -908,16 +910,27 @@ function drawPowerups() {
     ctx.fill();
     ctx.restore();
 
-    ctx.strokeStyle = `${powerup.color}cc`;
-    ctx.lineWidth = 2 + pulse * 1.6;
+    ctx.strokeStyle = `${powerup.color}dd`;
+    ctx.lineWidth = 3 + pulse * 2.2;
     ctx.beginPath();
     ctx.arc(powerup.x, powerup.y, powerup.r + pulse * 4, 0, Math.PI * 2);
     ctx.stroke();
 
     ctx.fillStyle = powerup.color;
     ctx.beginPath();
-    ctx.arc(powerup.x, powerup.y, powerup.r * (0.85 + pulse * 0.1), 0, Math.PI * 2);
+    ctx.arc(powerup.x, powerup.y, powerup.r * (0.95 + pulse * 0.08), 0, Math.PI * 2);
     ctx.fill();
+
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = `800 ${Math.round(powerup.r * 1.1)}px ${FONT_DISPLAY}`;
+    ctx.fillStyle = "rgba(8, 8, 18, 0.85)";
+    ctx.shadowColor = "rgba(255, 255, 255, 0.65)";
+    ctx.shadowBlur = 10;
+    ctx.fillText(powerup.letter, powerup.x, powerup.y + 1);
+    ctx.shadowBlur = 0;
+    ctx.restore();
   }
 }
 
@@ -1029,13 +1042,18 @@ function spawnPowerup(now) {
   }
   if (!spot) return;
   const lifespanMs = 5000 + Math.random() * 5000;
+  const driftAngle = Math.random() * Math.PI * 2;
+  const driftSpeed = 0.12 + Math.random() * 0.22;
   game.powerups.push({
     id: game.powerupState.nextId++,
     type,
     x: spot.x,
     y: spot.y,
-    r: 15,
+    r: 24,
     color: def.color,
+    letter: def.label[0]?.toUpperCase() || "?",
+    vx: Math.cos(driftAngle) * driftSpeed,
+    vy: Math.sin(driftAngle) * driftSpeed,
     spawnedAt: now,
     lifespanMs
   });
@@ -1057,7 +1075,35 @@ function maybeSpawnPowerup(now) {
 }
 
 function updatePowerups(now) {
-  game.powerups = game.powerups.filter((powerup) => (now - powerup.spawnedAt) <= powerup.lifespanMs);
+  const minX = 60;
+  const maxX = W - 60;
+  const minY = 60;
+  const maxY = H - 60;
+  game.powerups = game.powerups
+    .map((powerup) => {
+      const nx = powerup.x + powerup.vx;
+      const ny = powerup.y + powerup.vy;
+      let vx = powerup.vx;
+      let vy = powerup.vy;
+      let x = nx;
+      let y = ny;
+      if (x < minX || x > maxX) {
+        vx *= -1;
+        x = clamp(x, minX, maxX);
+      }
+      if (y < minY || y > maxY) {
+        vy *= -1;
+        y = clamp(y, minY, maxY);
+      }
+      return {
+        ...powerup,
+        x,
+        y,
+        vx,
+        vy
+      };
+    })
+    .filter((powerup) => (now - powerup.spawnedAt) <= powerup.lifespanMs);
 }
 
 function applyPowerupEffect(type, playerIndex, now) {
@@ -1085,12 +1131,13 @@ function collectPowerup(powerup) {
   const def = POWERUP_DEFS[powerup.type];
   if (!def) return;
   applyPowerupEffect(powerup.type, owner, performance.now());
-  spawnParticles(powerup.x, powerup.y, def.color, 28, 4.2);
-  spawnParticles(powerup.x, powerup.y, "#ffffff", 12, 5.2);
+  spawnParticles(powerup.x, powerup.y, def.color, 56, 6.2);
+  spawnParticles(powerup.x, powerup.y, "#ffffff", 26, 6.8);
   addImpactRing(powerup.x, powerup.y, def.color);
-  addFlash(0.32);
-  addShake(2.4);
+  addFlash(0.48);
+  addShake(3.1);
   playTone(520, 0.07, "triangle", 0.08);
+  playTone(760, 0.05, "square", 0.06);
 }
 
 function checkPowerupHits() {
@@ -1282,6 +1329,12 @@ function onGoal(scorer) {
 }
 
 function update() {
+  if (game.paused) {
+    updateParticles();
+    updateImpactRings();
+    updateSpectacle();
+    return;
+  }
   if (game.hitFreezeFrames > 0) {
     game.hitFreezeFrames -= 1;
     updateParticles();
@@ -1549,6 +1602,18 @@ function drawObjects() {
     ctx.textAlign = "start";
   }
 
+  if (game.paused) {
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#ffffff";
+    ctx.font = `700 40px ${FONT_DISPLAY}`;
+    ctx.textAlign = "center";
+    ctx.fillText("PAUSE", W / 2, H / 2 - 10);
+    ctx.font = `18px ${FONT_UI}`;
+    ctx.fillText("Space jatkaa", W / 2, H / 2 + 24);
+    ctx.textAlign = "start";
+  }
+
   // Keep particles visible over overlays so victory blast can fade out naturally.
   drawParticles();
   drawGoalSplash();
@@ -1673,6 +1738,14 @@ function setupInputs() {
     }
     if (ev.code === "KeyB") {
       game.musicEnabled = !game.musicEnabled;
+    }
+    if (ev.code === "Space") {
+      if (!game.started) {
+        applyMode(modeSelect.value, { start: true, randomizeSong: true });
+        ensureMusicLoop();
+      } else if (!game.ended) {
+        game.paused = !game.paused;
+      }
     }
   });
 
