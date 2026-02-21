@@ -31,6 +31,7 @@
           </select>
         </label>
         <button id="startBtn">Aloita / Resetoi</button>
+        <button id="fullscreenBtn" type="button">Koko ruutu</button>
       </div>
 
       <div class="stat-grid">
@@ -67,13 +68,14 @@
           <li><code>Shift</code>: P1 Slap Shot (cooldown)</li>
           <li><code>Enter</code>: P2 Slap Shot (cooldown)</li>
           <li><code>B</code>: musiikki päälle/pois</li>
+          <li><code>F</code>: koko ruutu</li>
           <li>Mobiili: näytön alareunan napit</li>
           <li>Voitto vaatii 2 pisteen eron, kun pistemäärä on saavutettu</li>
         </ul>
       </div>
     </section>
 
-    <section class="game-card">
+    <section class="game-card" id="gameCard">
       <canvas id="gameCanvas" width="1120" height="630" aria-label="UBERPONG pelialue"></canvas>
       <div class="mobile-controls" id="mobileControls">
         <div class="mobile-col">

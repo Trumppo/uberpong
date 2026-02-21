@@ -7,6 +7,7 @@ const ctx = canvas.getContext("2d");
 const modeSelect = document.getElementById("modeSelect");
 const opponentSelect = document.getElementById("opponentSelect");
 const startBtn = document.getElementById("startBtn");
+const fullscreenBtn = document.getElementById("fullscreenBtn");
 
 const tempoValue = document.getElementById("tempoValue");
 const comboValue = document.getElementById("comboValue");
@@ -20,6 +21,7 @@ const songName = document.getElementById("songName");
 const nextTrackBtn = document.getElementById("nextTrackBtn");
 const uberFill = document.getElementById("uberFill");
 const mobileControls = document.getElementById("mobileControls");
+const gameCard = document.getElementById("gameCard");
 
 const W = canvas.width;
 const H = canvas.height;
@@ -1739,6 +1741,9 @@ function setupInputs() {
     if (ev.code === "KeyB") {
       game.musicEnabled = !game.musicEnabled;
     }
+    if (ev.code === "KeyF") {
+      toggleFullscreen();
+    }
     if (ev.code === "Space") {
       if (!game.started) {
         applyMode(modeSelect.value, { start: true, randomizeSong: true });
@@ -1777,10 +1782,37 @@ function setupInputs() {
     randomizeMusicSong();
   });
 
+  if (fullscreenBtn) {
+    fullscreenBtn.addEventListener("click", toggleFullscreen);
+  }
+
   mobileControls.querySelectorAll("button[data-hold]").forEach(bindHoldButton);
 }
 
+function isFullscreenActive() {
+  return Boolean(document.fullscreenElement);
+}
+
+function updateFullscreenUi() {
+  if (!gameCard) return;
+  const active = isFullscreenActive();
+  gameCard.classList.toggle("fullscreen", active);
+  if (fullscreenBtn) {
+    fullscreenBtn.textContent = active ? "Poistu koko ruudusta" : "Koko ruutu";
+  }
+}
+
+function toggleFullscreen() {
+  if (!gameCard) return;
+  if (isFullscreenActive()) {
+    document.exitFullscreen?.();
+    return;
+  }
+  gameCard.requestFullscreen?.();
+}
+
 async function init() {
+  document.addEventListener("fullscreenchange", updateFullscreenUi);
   const [courtsResponse, musicResponse] = await Promise.all([
     fetch("./config/courts.json"),
     fetch("./config/music.json")
@@ -1809,6 +1841,7 @@ async function init() {
   randomizeMusicSong();
   applyMode("casual", { start: false });
   setupInputs();
+  updateFullscreenUi();
   loop();
 }
 
