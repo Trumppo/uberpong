@@ -24,7 +24,7 @@ test("boots and updates HUD during play", async ({ page }) => {
   const songName = page.locator("#songName");
   await expect(songName).not.toHaveText("-");
   await expect(songName).toHaveText(
-    /(Neon Drive|Laser Grid|Afterburner|Prism Rush|Arcade Pulse|Laser Skyline|Hyperdrive Glow|Neon Valkyrie|Circuit Bloom)/
+    /(Quantum Smash|Neon Rupture|Chrome Overdrive|Glitch Courier|Plasma Rush X|Zero Latency|Cobalt Afterimage|Void Serve|Reactor Arcade|Ion Storm)/
   );
 });
 
@@ -55,3 +55,4 @@ test("next track updates song label", async ({ page }) => {
   }
   expect(changed).toBe(true);
 });
+
